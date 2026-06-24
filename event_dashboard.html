@@ -311,6 +311,14 @@ nav.topnav{
 .kpi-stack-delta.delta-up{ color:var(--pos); }
 .kpi-stack-delta.delta-dn{ color:var(--neg); }
 .kpi-stack-delta.delta-flat{ color:var(--muted); }
+.kpi-stack-delta-pct{
+  display:block;
+  font-size:9px;
+  font-weight:400;
+  letter-spacing:.03em;
+  opacity:.72;
+  margin-top:1px;
+}
 
 /* Year-end projection panel — shows estimated full-year totals based on YTD pace.
    Visually distinct from the KPI strip (subtle accent border) to signal "this is forecast not actuals." */
@@ -1660,6 +1668,7 @@ function fmtN(v){ if(!isFinite(v)) return '0'; return Math.round(v).toLocaleStri
 function fmt$dec(v){ if(!isFinite(v)) return '$0.00'; return '$' + v.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtPct(v){ if(!isFinite(v)) return '—'; const sign = v >= 0 ? '+' : ''; return sign + (v*100).toFixed(1) + '%'; }
 function fmtDelta$(v){ if(!isFinite(v)) return '—'; const sign = v>=0 ? '+' : '-'; return sign + '$' + Math.abs(Math.round(v)).toLocaleString('en-US'); }
+function fmtDeltaN(v){ if(!isFinite(v)) return '—'; const sign = v>=0 ? '+' : '-'; return sign + Math.abs(Math.round(v)).toLocaleString('en-US'); }
 function deltaClass(v){ if(v>0) return 'delta-up'; if(v<0) return 'delta-dn'; return 'delta-flat'; }
 function deltaArrow(v){ if(v>0) return '▲'; if(v<0) return '▼'; return '•'; }
 function pctChange(now, then){ if(!then) return null; return (now-then)/then; }
@@ -2487,17 +2496,28 @@ function renderOverview(){
   }
 
   // Helper: render one stacked column for a given metric.
-  function buildMetricColumn(label, primaryVal, primarySub, getCompVal, getCompPct){
+  // The delta cell leads with the ABSOLUTE difference vs primary (e.g. "+106" orders or
+  // "+$12,400" CPO), with the percent change shown smaller underneath. getCompAbs returns
+  // the raw numeric difference (primary − comparison); fmtAbs formats it for that metric.
+  function buildMetricColumn(label, primaryVal, primarySub, getCompVal, getCompPct, getCompAbs, fmtAbs){
     const compHtml = compRows.map(r => {
       const pct = getCompPct(r);
+      const abs = getCompAbs ? getCompAbs(r) : null;
+      let deltaCell;
+      if (abs == null && pct == null) {
+        deltaCell = '<div class="kpi-stack-delta">—</div>';
+      } else {
+        const ref = abs != null ? abs : pct;                 // drives color + arrow
+        const mainStr = abs != null ? fmtAbs(abs) : fmtPct(pct);
+        const pctSub = (abs != null && pct != null)
+          ? `<span class="kpi-stack-delta-pct">${fmtPct(pct)}</span>` : '';
+        deltaCell = `<div class="kpi-stack-delta ${deltaClass(ref)}">${deltaArrow(ref)} ${mainStr}${pctSub}</div>`;
+      }
       return `
       <div class="kpi-stack-row">
         <div class="kpi-stack-yr">${r.year}</div>
         <div class="kpi-stack-val-sm">${getCompVal(r)}</div>
-        ${pct == null
-          ? '<div class="kpi-stack-delta">—</div>'
-          : `<div class="kpi-stack-delta ${deltaClass(pct)}">${deltaArrow(pct)} ${fmtPct(pct)}</div>`
-        }
+        ${deltaCell}
       </div>`;
     }).join('');
     return `<div class="kpi-stack">
@@ -2517,21 +2537,27 @@ function renderOverview(){
       fmt$(primT.cpo),
       `${primT.count} events`,
       r => fmt$(r.cpo),
-      r => r.dCpo
+      r => r.dCpo,
+      r => (primT.cpo - r.cpo),
+      fmtDelta$
     ) +
     buildMetricColumn(
       'Total Orders',
       fmtN(primT.orders),
       null,
       r => fmtN(r.orders),
-      r => r.dOrders
+      r => r.dOrders,
+      r => (primT.orders - r.orders),
+      fmtDeltaN
     ) +
     buildMetricColumn(
       'Avg Order',
       fmt$dec(primT.avg),
       null,
       r => r.avg ? fmt$dec(r.avg) : '—',
-      r => r.dAvg
+      r => r.dAvg,
+      r => (r.avg ? (primT.avg - r.avg) : null),
+      fmtDelta$
     );
 
   document.getElementById('ovKpis').innerHTML = kpiHtml;
