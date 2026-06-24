@@ -43,6 +43,9 @@
 
   /* Spacing scale */
   --gap:14px;
+
+  /* Elevation — subtle, product-grade depth (never heavy) */
+  --shadow-card:0 1px 2px rgba(24,24,27,.04), 0 10px 26px -14px rgba(24,24,27,.10);
 }
 *{box-sizing:border-box;}
 html{font-feature-settings:'cv11' 1, 'ss01' 1;}
@@ -69,68 +72,107 @@ code{font-family:var(--mono);font-size:.86em;background:var(--surface-alt);color
 /* ===== Top nav: minimal white, hairline border ===== */
 nav.topnav{
   position:sticky;top:0;z-index:30;
-  background:var(--surface);
+  background:rgba(255,255,255,0.86);
   border-bottom:1px solid var(--hairline);
-  backdrop-filter:saturate(180%) blur(8px);
+  backdrop-filter:saturate(180%) blur(10px);
+  -webkit-backdrop-filter:saturate(180%) blur(10px);
+  box-shadow:0 1px 2px rgba(24,24,27,0.03);
 }
 .nav-inner{
   max-width:1280px;margin:0 auto;
-  padding:14px 24px;
-  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:13px 24px;
+  display:flex;align-items:center;gap:10px 20px;flex-wrap:wrap;
 }
 .brand{
-  display:flex;align-items:baseline;gap:10px;
+  display:flex;align-items:center;gap:11px;
+  flex:0 0 auto;
+}
+.brand-mark{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:32px;height:32px;flex:0 0 auto;
+  background:var(--accent);
+  color:#fff;
+  font-family:var(--mono);
+  font-size:12px;font-weight:600;
+  letter-spacing:.03em;
+  border-radius:8px;
+  box-shadow:0 1px 2px rgba(180,88,9,0.30), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+.brand-name{
+  display:flex;flex-direction:column;
   font-family:var(--serif);
   font-weight:600;font-size:19px;
   letter-spacing:-.018em;
   color:var(--ink);
   font-style:italic;
+  line-height:1.08;
 }
-.brand-mark{
+.brand-team{
   font-family:var(--mono);
-  font-size:10px;font-weight:500;
-  letter-spacing:.18em;
-  color:var(--muted);
-  text-transform:uppercase;
   font-style:normal;
-  border:1px solid var(--hairline);
-  padding:3px 7px;
-  border-radius:3px;
+  font-weight:500;
+  font-size:9px;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--faded);
+  margin-top:2px;
 }
 .brand-dot{display:none;}
 
-.tabs{display:flex;gap:2px;flex-wrap:wrap;flex:1;}
+.tabs{
+  display:flex;gap:2px;align-items:center;
+  flex:1 1 auto;
+  flex-wrap:nowrap;
+  overflow-x:auto;
+  scrollbar-width:none;-ms-overflow-style:none;
+}
+.tabs::-webkit-scrollbar{display:none;}
 .tab{
   background:transparent;border:none;
-  padding:8px 12px;
+  padding:8px 13px;
   font-family:var(--sans);
   font-size:13px;font-weight:500;
   color:var(--muted);
   cursor:pointer;
-  position:relative;
+  white-space:nowrap;
   letter-spacing:-.005em;
-  transition:color .12s ease;
+  border-bottom:2px solid transparent;
+  border-radius:4px 4px 0 0;
+  transition:color .12s ease, border-color .12s ease, background .12s ease;
 }
-.tab:hover{color:var(--ink);}
-.tab.active{color:var(--ink);font-weight:600;}
-.tab.active::after{
-  content:"";position:absolute;
-  bottom:-15px;left:12px;right:12px;
-  height:2px;background:var(--ink);
+.tab:hover{color:var(--ink);background:var(--surface-alt);}
+.tab.active{color:var(--ink);font-weight:600;border-bottom-color:var(--ink);background:transparent;}
+
+.nav-controls{
+  display:flex;align-items:center;gap:12px;
+  flex:0 0 auto;
+  margin-left:auto;
 }
 
 .upload-btn{
   background:var(--ink);color:var(--surface);
-  padding:8px 14px;border-radius:5px;
+  padding:8px 15px;border-radius:6px;
   font-weight:500;font-size:12.5px;
   letter-spacing:-.005em;
   cursor:pointer;border:none;
   display:inline-flex;align-items:center;gap:6px;
   font-family:var(--sans);
-  transition:background .12s ease;
+  box-shadow:0 1px 2px rgba(24,24,27,0.16);
+  transition:background .12s ease, transform .08s ease;
 }
 .upload-btn:hover{background:var(--ink-soft);}
+.upload-btn:active{transform:translateY(1px);}
 .upload-btn input{display:none;}
+
+/* Narrow: tabs drop to their own full-width row that scrolls horizontally,
+   so they never wrap into the brand or controls. */
+@media (max-width:860px){
+  .tabs{
+    order:3;flex-basis:100%;
+    margin-top:2px;padding-top:8px;
+    border-top:1px solid var(--hairline);
+  }
+}
 
 /* ===== Page shell ===== */
 .page{display:none;max-width:1280px;margin:0 auto;padding:32px 24px 64px;}
@@ -216,8 +258,9 @@ nav.topnav{
   margin-bottom:32px;
   background:var(--surface);
   border:1px solid var(--hairline);
-  border-radius:8px;
+  border-radius:10px;
   overflow:hidden;
+  box-shadow:var(--shadow-card);
 }
 
 /* Overview-specific KPI matrix: 3 columns (CPO, Total Orders, Avg Order),
@@ -230,8 +273,9 @@ nav.topnav{
   margin-bottom:32px;
   background:var(--surface);
   border:1px solid var(--hairline);
-  border-radius:8px;
+  border-radius:10px;
   overflow:hidden;
+  box-shadow:var(--shadow-card);
 }
 
 /* Stacked KPI column — each column is a metric (CPO, Total Orders, Avg Order),
@@ -508,9 +552,10 @@ nav.topnav{
 .panel{
   background:var(--surface);
   border:1px solid var(--hairline);
-  border-radius:8px;
+  border-radius:10px;
   padding:24px 26px;
   margin-bottom:20px;
+  box-shadow:var(--shadow-card);
 }
 .phead{
   display:flex;align-items:flex-start;
@@ -926,7 +971,10 @@ nav.topnav{
 
 <nav class="topnav">
   <div class="nav-inner">
-    <div class="brand"><span class="brand-mark">EA · v2</span>Event Analyzer</div>
+    <div class="brand">
+      <span class="brand-mark">EA</span>
+      <span class="brand-name">Event Analyzer<span class="brand-team">RSD Events Team</span></span>
+    </div>
     <div class="tabs" id="tabs">
       <button class="tab" data-page="overview">Overview</button>
       <button class="tab" data-page="month">By Month</button>
@@ -934,14 +982,16 @@ nav.topnav{
       <button class="tab" data-page="event">By Event</button>
       <button class="tab" data-page="settings">Data &amp; Settings</button>
     </div>
-    <div class="year-mgr" id="yearMgr" style="display:none;">
-      <label>Primary year:</label>
-      <select id="yrPrimary"></select>
+    <div class="nav-controls">
+      <div class="year-mgr" id="yearMgr" style="display:none;">
+        <label>Primary year:</label>
+        <select id="yrPrimary"></select>
+      </div>
+      <label class="upload-btn" id="topUpload" style="display:none;">
+        + Add Data
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      </label>
     </div>
-    <label class="upload-btn" id="topUpload" style="display:none;">
-      + Add Data
-      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
-    </label>
   </div>
 </nav>
 
