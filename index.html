@@ -2093,10 +2093,22 @@ function filterByCat(events){
 // =================================================
 // AUTO INSIGHTS — rule-based analysis of the data
 // =================================================
+// Auto-insights intentionally ignore certain event types: Industry, Realtor (RLT),
+// and internal team meetings. They're filtered out of EVERY insight (headline totals,
+// category leaders, event callouts, pace) so the analysis stays focused on sales shows.
+const INSIGHT_EXCLUDED_CATS = new Set(['Industry', 'RLT']);
+function isExcludedFromInsights(ev){
+  if (INSIGHT_EXCLUDED_CATS.has(ev.category)) return true;
+  const name = (ev.eventDisplay || ev.eventRaw || '').toLowerCase();
+  if (/team\s*(meeting|meet[\s-]?up|mtg)/.test(name)) return true;  // internal team meetings
+  return false;
+}
+function insightEvents(events){ return events.filter(e => !isExcludedFromInsights(e)); }
+
 function generateInsights(primaryYear, compareYear, scope){
   const insights = [];
-  const primEvs = eventsInScope(primaryYear, scope);
-  const compEvs = eventsInScope(compareYear, scope);
+  const primEvs = insightEvents(eventsInScope(primaryYear, scope));
+  const compEvs = insightEvents(eventsInScope(compareYear, scope));
   const tP = totalsFor(primEvs);
   const tC = totalsFor(compEvs);
 
@@ -2364,6 +2376,7 @@ function renderInsights(primaryYear, compareYear, scope){
   if (!insights.length) {
     html = `<p style="color:var(--muted);font-size:13px;margin:0;">No findings to report.</p>`;
   }
+  html += `<p style="color:var(--faded);font-size:11px;margin:14px 0 0;font-style:italic;">Auto insights exclude Industry, Realtor, and team-meeting events — these totals may differ from the KPI strip above.</p>`;
   document.getElementById('insightsContent').innerHTML = html;
 }
 
