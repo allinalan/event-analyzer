@@ -1,0 +1,3447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event Analyzer — Year-Over-Year Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..800,0..100&family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  /* Paper & ink — warm off-white neutrals, near-black text */
+  --paper:#FAFAF7;
+  --surface:#FFFFFF;
+  --surface-alt:#F5F4EF;
+  --hairline:#E7E5DF;
+  --hairline-strong:#D4D2CB;
+
+  --ink:#18181B;
+  --ink-soft:#3F3F46;
+  --muted:#71717A;
+  --faded:#A1A1AA;
+
+  /* Signal — used only for data semantics, never decoration */
+  --pos:#15803D;
+  --pos-bg:#F0FAF1;
+  --neg:#991B1B;
+  --neg-bg:#FDF4F4;
+  --warn:#92400E;
+  --warn-bg:#FEFAF1;
+  --info:#1E40AF;
+  --info-bg:#F1F4FB;
+
+  /* Single accent — used for primary year marker, focused state */
+  --accent:#B45309;
+  --accent-soft:#FEF3E2;
+
+  /* Type system */
+  --serif:'Fraunces', 'Iowan Old Style', 'Charter', Georgia, serif;
+  --sans:'Geist', -apple-system, 'Segoe UI', sans-serif;
+  --mono:'Geist Mono', 'SF Mono', Menlo, monospace;
+
+  /* Spacing scale */
+  --gap:14px;
+}
+*{box-sizing:border-box;}
+html{font-feature-settings:'cv11' 1, 'ss01' 1;}
+body{
+  margin:0;padding:0;
+  font-family:var(--sans);
+  background:var(--paper);
+  color:var(--ink);
+  font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  font-feature-settings:'ss01';
+}
+::selection{background:var(--accent-soft);color:var(--ink);}
+
+/* Utility for tabular numerals — used heavily */
+.num, .tabnum, .kpi-val, .tbl td.r, .num-display{
+  font-variant-numeric:tabular-nums lining-nums;
+  font-feature-settings:'tnum' 1, 'lnum' 1, 'cv11' 1;
+}
+
+code{font-family:var(--mono);font-size:.86em;background:var(--surface-alt);color:var(--ink);padding:1px 6px;border-radius:3px;letter-spacing:-.005em;}
+
+/* ===== Top nav: minimal white, hairline border ===== */
+nav.topnav{
+  position:sticky;top:0;z-index:30;
+  background:var(--surface);
+  border-bottom:1px solid var(--hairline);
+  backdrop-filter:saturate(180%) blur(8px);
+}
+.nav-inner{
+  max-width:1280px;margin:0 auto;
+  padding:14px 24px;
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+}
+.brand{
+  display:flex;align-items:baseline;gap:10px;
+  font-family:var(--serif);
+  font-weight:600;font-size:19px;
+  letter-spacing:-.018em;
+  color:var(--ink);
+  font-style:italic;
+}
+.brand-mark{
+  font-family:var(--mono);
+  font-size:10px;font-weight:500;
+  letter-spacing:.18em;
+  color:var(--muted);
+  text-transform:uppercase;
+  font-style:normal;
+  border:1px solid var(--hairline);
+  padding:3px 7px;
+  border-radius:3px;
+}
+.brand-dot{display:none;}
+
+.tabs{display:flex;gap:2px;flex-wrap:wrap;flex:1;}
+.tab{
+  background:transparent;border:none;
+  padding:8px 12px;
+  font-family:var(--sans);
+  font-size:13px;font-weight:500;
+  color:var(--muted);
+  cursor:pointer;
+  position:relative;
+  letter-spacing:-.005em;
+  transition:color .12s ease;
+}
+.tab:hover{color:var(--ink);}
+.tab.active{color:var(--ink);font-weight:600;}
+.tab.active::after{
+  content:"";position:absolute;
+  bottom:-15px;left:12px;right:12px;
+  height:2px;background:var(--ink);
+}
+
+.upload-btn{
+  background:var(--ink);color:var(--surface);
+  padding:8px 14px;border-radius:5px;
+  font-weight:500;font-size:12.5px;
+  letter-spacing:-.005em;
+  cursor:pointer;border:none;
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--sans);
+  transition:background .12s ease;
+}
+.upload-btn:hover{background:var(--ink-soft);}
+.upload-btn input{display:none;}
+
+/* ===== Page shell ===== */
+.page{display:none;max-width:1280px;margin:0 auto;padding:32px 24px 64px;}
+.page.active{display:block;}
+.eyebrow{
+  font-family:var(--mono);
+  font-size:10.5px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.16em;
+  font-weight:500;
+  margin-bottom:8px;
+}
+.ptitle{
+  font-family:var(--serif);
+  font-size:38px;font-weight:400;
+  color:var(--ink);
+  margin:0 0 6px;
+  letter-spacing:-.024em;
+  line-height:1.05;
+}
+.ptitle span{
+  font-style:italic;
+  font-weight:400;
+}
+.psub{
+  font-size:14px;color:var(--muted);
+  margin:0 0 32px;
+  max-width:640px;
+  line-height:1.55;
+}
+
+/* ===== Empty state ===== */
+.empty{text-align:center;padding:64px 20px 40px;}
+.empty-ico{
+  font-family:var(--serif);
+  font-style:italic;
+  font-size:64px;
+  color:var(--accent);
+  font-weight:300;
+  margin-bottom:8px;
+  letter-spacing:-.04em;
+}
+.empty h1{
+  font-family:var(--serif);
+  font-size:44px;font-weight:400;
+  margin:0 0 14px;
+  color:var(--ink);
+  letter-spacing:-.028em;
+  line-height:1.05;
+}
+.empty h1 span{font-style:italic;font-weight:400;}
+.empty p{
+  font-size:15.5px;
+  color:var(--muted);
+  max-width:560px;margin:0 auto 28px;
+  line-height:1.6;
+}
+.empty .upload-btn{font-size:14px;padding:11px 22px;}
+.help-box{
+  margin:48px auto 0;max-width:560px;
+  text-align:left;
+  background:var(--surface);
+  border:1px solid var(--hairline);
+  border-radius:8px;padding:22px 24px;
+}
+.help-box h3{
+  font-family:var(--mono);
+  font-size:10.5px;font-weight:500;
+  margin:0 0 14px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.16em;
+}
+.help-box ul{margin:0;padding-left:18px;color:var(--ink-soft);font-size:13px;line-height:1.85;}
+.help-box li code{font-size:.88em;}
+
+/* ===== KPI cards — type-driven, big serif numbers ===== */
+.kpi-row{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:0;
+  margin-bottom:32px;
+  background:var(--surface);
+  border:1px solid var(--hairline);
+  border-radius:8px;
+  overflow:hidden;
+}
+
+/* Overview-specific KPI matrix: 3 columns (CPO, Total Orders, Avg Order),
+   each containing stacked year rows. Distinct from .kpi-row which is used by
+   By Month and By Campaign with one card per year. */
+.kpi-matrix{
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:0;
+  margin-bottom:32px;
+  background:var(--surface);
+  border:1px solid var(--hairline);
+  border-radius:8px;
+  overflow:hidden;
+}
+
+/* Stacked KPI column — each column is a metric (CPO, Total Orders, Avg Order),
+   with primary year as the headline at top and comparison years stacked below. */
+.kpi-stack{
+  padding:20px 24px 16px;
+  border-right:1px solid var(--hairline);
+  background:var(--surface);
+}
+.kpi-stack:last-child{border-right:none;}
+.kpi-stack-lbl{
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:500;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:14px;
+}
+.kpi-stack-row{
+  padding:10px 0;
+  border-top:1px dashed var(--hairline);
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  align-items:baseline;
+  column-gap:14px;
+  row-gap:2px;
+}
+.kpi-stack-row:first-of-type{border-top:none;padding-top:0;}
+.kpi-stack-row.primary{
+  padding-bottom:14px;
+  margin-bottom:4px;
+  border-bottom:1px solid var(--hairline-strong);
+  grid-template-columns:1fr;
+  row-gap:4px;
+}
+.kpi-stack-yr{
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:.1em;
+  color:var(--muted);
+}
+.kpi-stack-row.primary .kpi-stack-yr{
+  font-size:10px;
+}
+.kpi-stack-val{
+  font-family:var(--serif);
+  font-size:34px;
+  font-weight:400;
+  line-height:1.05;
+  color:var(--ink);
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-.01em;
+}
+.kpi-stack-val-sm{
+  font-family:var(--serif);
+  font-size:18px;
+  font-weight:400;
+  line-height:1.1;
+  color:var(--ink);
+  font-variant-numeric:tabular-nums;
+  text-align:right;
+}
+.kpi-stack-sub{
+  font-size:11.5px;
+  color:var(--muted);
+}
+.kpi-stack-delta{
+  font-family:var(--mono);
+  font-size:10.5px;
+  font-weight:500;
+  letter-spacing:.04em;
+  text-align:right;
+  color:var(--muted);
+  white-space:nowrap;
+}
+.kpi-stack-delta.delta-up{ color:var(--pos); }
+.kpi-stack-delta.delta-dn{ color:var(--neg); }
+.kpi-stack-delta.delta-flat{ color:var(--muted); }
+
+/* Year-end projection panel — shows estimated full-year totals based on YTD pace.
+   Visually distinct from the KPI strip (subtle accent border) to signal "this is forecast not actuals." */
+.proj-panel{
+  border-left:3px solid var(--accent);
+}
+.proj-headline{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:0;
+  margin:8px 0 14px;
+}
+.proj-cell{
+  padding:6px 24px 6px 0;
+  border-right:1px solid var(--hairline);
+}
+.proj-cell:last-child{ border-right:none; }
+.proj-cell-lbl{
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:500;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:4px;
+}
+.proj-cell-val{
+  font-family:var(--serif);
+  font-size:30px;
+  font-weight:400;
+  line-height:1.05;
+  color:var(--ink);
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-.01em;
+}
+.proj-vs{
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:.04em;
+  margin-bottom:8px;
+}
+.proj-vs .delta-up{ color:var(--pos); }
+.proj-vs .delta-dn{ color:var(--neg); }
+.proj-vs .delta-flat{ color:var(--muted); }
+.proj-range{
+  font-size:12px;
+  color:var(--muted);
+  font-style:italic;
+  margin-bottom:6px;
+}
+.proj-method{
+  margin-top:14px;
+  border-top:1px dashed var(--hairline);
+  padding-top:12px;
+}
+.proj-method summary{
+  cursor:pointer;
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:500;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--accent);
+  user-select:none;
+  outline:none;
+}
+.proj-method summary:hover{ color:var(--ink); }
+.proj-method p{
+  font-size:12.5px;
+  line-height:1.6;
+  color:var(--muted);
+  margin:10px 0;
+}
+.proj-tbl{
+  margin:10px 0;
+}
+.proj-tbl td, .proj-tbl th{
+  font-size:12px;
+}
+
+@media (max-width: 720px){
+  .kpi-matrix{ grid-template-columns:1fr; }
+  .kpi-stack{ border-right:none; border-bottom:1px solid var(--hairline); }
+  .kpi-stack:last-child{ border-bottom:none; }
+  .proj-headline{ grid-template-columns:1fr; }
+  .proj-cell{ border-right:none; border-bottom:1px solid var(--hairline); padding:10px 0; }
+  .proj-cell:last-child{ border-bottom:none; }
+}
+
+/* Toggle row above the KPI strip — lets the user pick which comparison years to show.
+   Off-state chips are dimmed and use a strikethrough so it's obvious they're disabled
+   without making them disappear (still hoverable to bring back). */
+.kpi-toggle-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin:0 0 12px 0;
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+}
+.kpi-toggle-lbl{
+  color:var(--muted);
+}
+.yr-chip{
+  display:inline-flex;
+  align-items:center;
+  padding:5px 11px;
+  border:1px solid var(--hairline-strong);
+  border-radius:999px;
+  cursor:pointer;
+  user-select:none;
+  background:var(--surface);
+  color:var(--ink);
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:.14em;
+  transition:all 0.15s ease;
+}
+.yr-chip:hover{
+  border-color:var(--accent);
+  color:var(--accent);
+}
+.yr-chip:focus{
+  outline:none;
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(180,88,9,0.15);
+}
+.yr-chip.off{
+  color:var(--faded);
+  border-color:var(--hairline);
+  text-decoration:line-through;
+  background:transparent;
+}
+.yr-chip.off:hover{
+  color:var(--ink);
+  border-color:var(--ink);
+  text-decoration:none;
+}
+.kpi{
+  padding:20px 24px;
+  position:relative;
+  border-right:1px solid var(--hairline);
+  border-bottom:1px solid var(--hairline);
+  background:var(--surface);
+}
+.kpi:last-child{border-right:none;}
+.kpi-lbl{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.16em;
+  font-weight:500;
+  margin-bottom:10px;
+}
+.kpi-val{
+  font-family:var(--serif);
+  font-size:32px;
+  font-weight:400;
+  color:var(--ink);
+  letter-spacing:-.026em;
+  line-height:1;
+  font-variant-numeric:tabular-nums lining-nums;
+  font-feature-settings:'tnum' 1, 'lnum' 1, 'ss01' 1, 'cv11' 1;
+}
+.kpi-sub{
+  font-size:12px;color:var(--muted);
+  margin-top:8px;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-.005em;
+}
+.kpi-delta{
+  font-size:12px;font-weight:500;
+  margin-top:6px;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-.005em;
+}
+
+.delta-up{color:var(--pos);}
+.delta-dn{color:var(--neg);}
+.delta-flat{color:var(--muted);}
+
+/* ===== Panels ===== */
+.panel{
+  background:var(--surface);
+  border:1px solid var(--hairline);
+  border-radius:8px;
+  padding:24px 26px;
+  margin-bottom:20px;
+}
+.phead{
+  display:flex;align-items:flex-start;
+  justify-content:space-between;
+  margin-bottom:18px;
+  flex-wrap:wrap;gap:12px;
+}
+.ptit2{
+  font-family:var(--serif);
+  font-size:18px;font-weight:500;
+  color:var(--ink);
+  letter-spacing:-.012em;
+  line-height:1.2;
+}
+.ptit2-sub{
+  font-family:var(--sans);
+  font-size:12px;
+  color:var(--muted);
+  font-weight:400;
+  letter-spacing:-.005em;
+  margin-left:8px;
+  font-style:italic;
+}
+
+/* ===== Tables — minimal, type-driven ===== */
+.tbl{
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+}
+.tbl th{
+  text-align:left;
+  padding:10px 12px 10px 0;
+  border-bottom:1px solid var(--hairline-strong);
+  color:var(--muted);
+  font-family:var(--mono);
+  font-weight:500;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.14em;
+  background:transparent;
+  white-space:nowrap;
+}
+.tbl th:first-child{padding-left:0;}
+.tbl th.r{text-align:right;}
+
+/* Comparison-year picker that lives inside a table header cell.
+   The <select> is styled to be visually identical to the column-header text,
+   but it has a thin underline + a small caret so it reads as interactive. */
+.cmp-yr-pick{
+  display:inline-flex;
+  align-items:baseline;
+  gap:0;
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:500;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+.cmp-yr-pre, .cmp-yr-post{ pointer-events:none; }
+.cmp-yr-select{
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+  background:transparent;
+  border:none;
+  border-bottom:1px dashed var(--hairline-strong);
+  color:var(--accent);
+  font:inherit;
+  letter-spacing:inherit;
+  text-transform:inherit;
+  text-align:right;
+  padding:1px 14px 1px 2px;
+  margin:0 2px;
+  cursor:pointer;
+  outline:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--accent) 50%),linear-gradient(135deg,var(--accent) 50%,transparent 50%);
+  background-position:calc(100% - 6px) 60%, calc(100% - 2px) 60%;
+  background-size:4px 4px, 4px 4px;
+  background-repeat:no-repeat;
+}
+.cmp-yr-select:hover, .cmp-yr-select:focus{
+  border-bottom-color:var(--accent);
+  border-bottom-style:solid;
+}
+
+/* Inline comparison-year picker living inside the Auto Insights panel title.
+   Sized larger than the matrix one because it sits in body text, not a column header. */
+.insight-cmp-select{
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+  background:transparent;
+  border:none;
+  border-bottom:1px dashed var(--accent);
+  color:var(--accent);
+  font:inherit;
+  font-style:italic;
+  font-weight:500;
+  padding:0 14px 1px 2px;
+  margin:0 1px;
+  cursor:pointer;
+  outline:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--accent) 50%),linear-gradient(135deg,var(--accent) 50%,transparent 50%);
+  background-position:calc(100% - 6px) 60%, calc(100% - 2px) 60%;
+  background-size:4px 4px, 4px 4px;
+  background-repeat:no-repeat;
+}
+.insight-cmp-select:hover, .insight-cmp-select:focus{
+  border-bottom-style:solid;
+  background-color:rgba(180,88,9,0.06);
+}
+.tbl td{
+  padding:11px 12px 11px 0;
+  border-bottom:1px solid var(--hairline);
+  color:var(--ink-soft);
+  letter-spacing:-.005em;
+}
+.tbl td:first-child{padding-left:0;}
+.tbl td.r{
+  text-align:right;
+  font-variant-numeric:tabular-nums lining-nums;
+  font-feature-settings:'tnum' 1, 'lnum' 1;
+  color:var(--ink);
+}
+.tbl td.cat{
+  font-weight:500;
+  color:var(--ink);
+}
+.tbl tr.total td{
+  font-weight:600;
+  border-top:1px solid var(--ink);
+  border-bottom:none;
+  color:var(--ink);
+  padding-top:13px;
+}
+.tbl tr.total td.cat{
+  font-family:var(--mono);
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.16em;
+  color:var(--muted);
+  font-weight:500;
+}
+.tbl tr:last-child td{border-bottom:none;}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px;}
+
+/* ===== Pills/badges ===== */
+.badge{
+  display:inline-block;
+  padding:2px 9px;
+  border-radius:3px;
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:500;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+}
+.bb{background:var(--surface-alt);color:var(--ink-soft);border:1px solid var(--hairline);}
+.bg{background:var(--pos-bg);color:var(--pos);}
+.br{background:var(--neg-bg);color:var(--neg);}
+.by{background:var(--warn-bg);color:var(--warn);}
+.bn{background:var(--surface-alt);color:var(--muted);}
+
+/* ===== Chips ===== */
+.chip-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;align-items:center;}
+.chip{
+  background:var(--surface);
+  border:1px solid var(--hairline);
+  color:var(--ink-soft);
+  padding:6px 12px;
+  border-radius:4px;
+  font-size:12.5px;font-weight:500;
+  cursor:pointer;
+  transition:all .12s ease;
+  font-family:var(--sans);
+  letter-spacing:-.005em;
+}
+.chip:hover{border-color:var(--ink);color:var(--ink);}
+.chip.active{
+  background:var(--ink);
+  color:var(--surface);
+  border-color:var(--ink);
+}
+
+/* ===== Toggle ===== */
+.toggle-row{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted);}
+.toggle{
+  position:relative;
+  width:34px;height:20px;
+  background:var(--hairline-strong);
+  border-radius:10px;cursor:pointer;
+  transition:background .15s;
+}
+.toggle.on{background:var(--ink);}
+.toggle::after{
+  content:"";position:absolute;
+  top:2px;left:2px;width:16px;height:16px;
+  background:var(--surface);
+  border-radius:50%;
+  transition:left .15s;
+}
+.toggle.on::after{left:16px;}
+
+/* ===== Sub-tabs ===== */
+.subtabs{
+  display:flex;gap:0;
+  border-bottom:1px solid var(--hairline);
+  margin-bottom:18px;flex-wrap:wrap;
+}
+.subtab{
+  background:none;border:none;
+  padding:10px 14px;
+  font-size:13px;font-weight:500;
+  color:var(--muted);
+  cursor:pointer;
+  border-bottom:2px solid transparent;
+  margin-bottom:-1px;
+  font-family:var(--sans);
+  letter-spacing:-.005em;
+}
+.subtab:hover{color:var(--ink);}
+.subtab.active{
+  color:var(--ink);font-weight:600;
+  border-bottom-color:var(--ink);
+}
+
+/* ===== Search row ===== */
+.search-row{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.search-row input,.search-row select{
+  font-size:13px;
+  padding:8px 12px;
+  border:1px solid var(--hairline);
+  border-radius:5px;
+  background:var(--surface);
+  color:var(--ink);
+  font-family:var(--sans);
+  letter-spacing:-.005em;
+}
+.search-row input{flex:1;min-width:200px;}
+.search-row input:focus,.search-row select:focus{
+  outline:none;border-color:var(--ink);
+}
+
+.btn{
+  background:var(--surface);
+  border:1px solid var(--hairline);
+  color:var(--ink);
+  padding:7px 13px;
+  border-radius:5px;
+  font-size:12.5px;cursor:pointer;
+  font-weight:500;font-family:var(--sans);
+  letter-spacing:-.005em;
+  transition:all .12s ease;
+}
+.btn:hover{border-color:var(--ink);}
+.btn-pri{background:var(--ink);color:var(--surface);border:none;}
+.btn-pri:hover{background:var(--ink-soft);color:var(--surface);}
+.btn-dn{background:var(--surface);color:var(--neg);border-color:var(--hairline);}
+.btn-dn:hover{border-color:var(--neg);background:var(--neg-bg);}
+.download-btn{
+  background:transparent;
+  color:var(--muted);
+  border:1px solid var(--hairline);
+  padding:5px 11px;
+  border-radius:4px;
+  font-size:11px;cursor:pointer;
+  font-weight:500;
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  transition:all .12s ease;
+}
+.download-btn:hover{color:var(--ink);border-color:var(--ink);}
+
+/* ===== Toast ===== */
+.toast{
+  position:fixed;bottom:24px;right:24px;
+  background:var(--ink);color:var(--surface);
+  padding:13px 18px;
+  border-radius:6px;
+  z-index:100;font-size:13px;
+  max-width:360px;display:none;
+  letter-spacing:-.005em;
+  box-shadow:0 10px 30px rgba(0,0,0,.12);
+}
+.toast.show{display:block;animation:slideIn .3s cubic-bezier(.2,.8,.2,1);}
+.toast.error{background:var(--neg);}
+.toast.success{background:var(--pos);}
+.toast.warn{background:var(--warn);}
+@keyframes slideIn{from{transform:translateY(12px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+
+/* ===== Year picker in nav ===== */
+.year-mgr{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.year-mgr label{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.14em;
+}
+.year-mgr select{
+  font-size:12.5px;
+  padding:6px 10px;
+  border-radius:4px;
+  border:1px solid var(--hairline);
+  background:var(--surface);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-weight:500;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:-.005em;
+}
+.year-mgr select:focus{outline:none;border-color:var(--ink);}
+
+/* ===== Pace banner — refined, not alarming ===== */
+.pace-banner{
+  background:var(--accent-soft);
+  border:1px solid #F0DCB5;
+  border-left:3px solid var(--accent);
+  border-radius:5px;
+  padding:14px 18px;
+  margin-bottom:24px;
+  font-size:13px;color:var(--warn);
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  letter-spacing:-.005em;
+}
+.pace-banner strong{color:#7a3f06;font-weight:600;}
+
+/* ===== Year tag (in settings) ===== */
+.yr-tag{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:3px 10px;
+  border-radius:4px;
+  background:var(--surface-alt);
+  color:var(--ink);
+  font-family:var(--mono);
+  font-size:11px;font-weight:500;
+  letter-spacing:.04em;
+  margin-right:6px;
+}
+.yr-tag .x{cursor:pointer;color:var(--muted);font-size:14px;line-height:1;}
+.yr-tag .x:hover{color:var(--neg);}
+
+/* ===== Currency symbol styling — slightly de-emphasized ===== */
+.kpi-val::first-letter{
+  font-weight:300;
+  margin-right:1px;
+  color:var(--ink-soft);
+}
+
+/* ===== Insights — refined cards ===== */
+.insight-card{
+  background:var(--surface);
+  border:1px solid var(--hairline);
+  border-left-width:3px;
+  border-radius:0 5px 5px 0;
+  padding:14px 18px;
+  margin-bottom:8px;
+}
+.insight-card[data-sev="positive"]{border-left-color:var(--pos);}
+.insight-card[data-sev="negative"]{border-left-color:var(--neg);}
+.insight-card[data-sev="caution"]{border-left-color:var(--warn);}
+.insight-card[data-sev="neutral"]{border-left-color:var(--faded);}
+.insight-title{
+  font-family:var(--sans);
+  font-weight:600;font-size:13.5px;
+  color:var(--ink);
+  letter-spacing:-.008em;
+  line-height:1.4;
+}
+.insight-text{
+  font-size:12.5px;color:var(--muted);
+  margin-top:5px;
+  line-height:1.55;
+  letter-spacing:-.005em;
+}
+.insight-text strong{color:var(--ink);font-weight:500;}
+
+/* ===== Section divider ===== */
+.section-divide{
+  border:none;
+  border-top:1px solid var(--hairline);
+  margin:36px 0 28px;
+}
+
+/* ===== Mobile ===== */
+@media (max-width:640px){
+  .nav-inner{padding:12px 18px;gap:10px;}
+  .brand{font-size:17px;}
+  .page{padding:24px 18px 48px;}
+  .ptitle{font-size:30px;}
+  .empty h1{font-size:34px;}
+  .empty-ico{font-size:48px;}
+  .panel{padding:18px 16px;}
+  .kpi{padding:16px 18px;}
+  .kpi-val{font-size:26px;}
+  .tbl{font-size:12px;}
+  .tbl th, .tbl td{padding:9px 8px 9px 0;}
+  .ptit2{font-size:16px;}
+}
+
+/* ===== Print ===== */
+@media print{
+  nav.topnav, .upload-btn, .download-btn, .toggle, .btn{display:none !important;}
+  body{background:#fff;}
+  .panel{break-inside:avoid;box-shadow:none;border:1px solid #ccc;}
+}
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="nav-inner">
+    <div class="brand"><span class="brand-mark">EA · v2</span>Event Analyzer</div>
+    <div class="tabs" id="tabs">
+      <button class="tab" data-page="overview">Overview</button>
+      <button class="tab" data-page="month">By Month</button>
+      <button class="tab" data-page="campaign">By Campaign</button>
+      <button class="tab" data-page="event">By Event</button>
+      <button class="tab" data-page="settings">Data &amp; Settings</button>
+    </div>
+    <div class="year-mgr" id="yearMgr" style="display:none;">
+      <label>Primary year:</label>
+      <select id="yrPrimary"></select>
+    </div>
+    <label class="upload-btn" id="topUpload" style="display:none;">
+      + Add Data
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+    </label>
+  </div>
+</nav>
+
+<!-- Empty state -->
+<div id="emptyPage" class="page active">
+  <div class="empty">
+    <div class="empty-ico">№</div>
+    <h1>Welcome to your <span>Event Analyzer</span></h1>
+    <p>Upload your event tracking files year by year. Each upload adds to a permanent vault stored in this browser, so your 2024 and 2025 data stays put when you upload 2023 or 2026. The only manual step is categorizing each event in the <code>Rank</code> column of your spreadsheet.</p>
+    <label class="upload-btn">
+      Upload your first XLSX
+      <input type="file" id="fileInput2" accept=".xlsx,.xls,.csv">
+    </label>
+    <div class="help-box">
+      <h3>Required columns (any sheet that matches will be loaded)</h3>
+      <ul>
+        <li><code>Event</code> — event name (with or without leading ID)</li>
+        <li><code>Start Date</code> &amp; <code>End Date</code> — used to bucket by year &amp; month</li>
+        <li><code>Rank</code> — your category (Elite, Key, Traditional, Service Event, Mesa Marketplace, Malls, RLT, Industry)</li>
+        <li><code>Total</code> or <code>Total CPO</code> — total CPO / sales</li>
+        <li><code>Total Orders</code> or <code>Total 2</code> or <code>Orders</code> — total orders</li>
+      </ul>
+      <p style="font-size:11.5px;color:var(--muted);margin-top:10px;">Multiple sheets per file are fine — the dashboard reads them all and auto-splits by year using the dates. Re-uploading a year replaces it (so updates work).</p>
+    </div>
+  </div>
+</div>
+
+<!-- Overview -->
+<div id="overviewPage" class="page">
+  <div class="eyebrow">All Years • All Categories</div>
+  <h1 class="ptitle"><span id="ovTitle">Overview</span></h1>
+  <p class="psub" id="ovSub"></p>
+  <div id="paceBanner"></div>
+  <div id="ovKpiToggles"></div>
+  <div class="kpi-matrix" id="ovKpis"></div>
+  <div id="projectionPanel" style="display:none;"></div>
+  <div class="panel" id="insightsPanel" style="display:none;">
+    <div class="phead">
+      <div>
+        <div class="ptit2">
+          Auto Insights
+          <span class="ptit2-sub" id="insightHeaderSub">— comparing <span id="insightHeadPrimary"></span> against <span id="insightHeadCompareWrap"><select id="insightCompareYr" class="insight-cmp-select" aria-label="Year to compare against"></select></span></span>
+        </div>
+      </div>
+    </div>
+    <div id="insightsContent"></div>
+  </div>
+  <div class="panel">
+    <div class="phead">
+      <div><div class="ptit2">CPO by Category <span class="ptit2-sub" id="ovScopeLbl"></span></div></div>
+      <button class="download-btn" id="dlOverview">Export CSV</button>
+    </div>
+    <div class="tbl-wrap"><table class="tbl" id="ovCpoTable"></table></div>
+  </div>
+  <div class="panel">
+    <div class="phead"><div class="ptit2">Total Orders by Category <span class="ptit2-sub" id="ovScopeLbl2"></span></div></div>
+    <div class="tbl-wrap"><table class="tbl" id="ovOrdTable"></table></div>
+  </div>
+  <div class="panel">
+    <div class="phead"><div class="ptit2">Average Order by Category <span class="ptit2-sub" id="ovScopeLbl3"></span></div></div>
+    <div class="tbl-wrap"><table class="tbl" id="ovAvgTable"></table></div>
+  </div>
+  <div class="panel">
+    <div class="phead"><div class="ptit2"># Events by Category <span class="ptit2-sub" id="ovScopeLbl4"></span></div></div>
+    <div class="tbl-wrap"><table class="tbl" id="ovCntTable"></table></div>
+  </div>
+</div>
+
+<!-- By Month -->
+<div id="monthPage" class="page">
+  <div class="eyebrow">Monthly Performance</div>
+  <h1 class="ptitle"><span>By Month</span></h1>
+  <p class="psub">Pick a month to see all years side by side, or scroll down for the full 12-month grid. Lock to one ranking to watch just that category move through time.</p>
+  <div class="chip-row" id="monthCatChips"></div>
+  <div class="chip-row" id="monthChips"></div>
+  <div id="monthYearToggles"></div>
+  <div id="monthDetail"></div>
+  <div class="panel">
+    <div class="phead"><div class="ptit2">All months × All years (CPO)</div></div>
+    <div class="tbl-wrap"><table class="tbl" id="monthGrid"></table></div>
+  </div>
+  <div class="panel">
+    <div class="phead"><div class="ptit2">All months × All years (Total Orders)</div></div>
+    <div class="tbl-wrap"><table class="tbl" id="monthGridOrd"></table></div>
+  </div>
+</div>
+
+<!-- By Campaign -->
+<div id="campaignPage" class="page">
+  <div class="eyebrow">Campaign Performance</div>
+  <h1 class="ptitle"><span>By Campaign</span></h1>
+  <p class="psub">Roll-ups by 4-month campaign window. Campaign I = Jan–Apr, Campaign II = May–Aug, Campaign III = Sep–Dec. Lock to one ranking to compare a single category across campaigns.</p>
+  <div class="chip-row" id="campCatChips"></div>
+  <div class="chip-row" id="campChips"></div>
+  <div id="campYearToggles"></div>
+  <div id="campDetail"></div>
+  <div class="panel">
+    <div class="phead"><div class="ptit2">All campaigns × All years (CPO)</div></div>
+    <div class="tbl-wrap"><table class="tbl" id="campGrid"></table></div>
+  </div>
+  <div class="panel">
+    <div class="phead"><div class="ptit2">All campaigns × All years (Total Orders)</div></div>
+    <div class="tbl-wrap"><table class="tbl" id="campGridOrd"></table></div>
+  </div>
+</div>
+
+<!-- By Event -->
+<div id="eventPage" class="page">
+  <div class="eyebrow">Event-Level Comparison</div>
+  <h1 class="ptitle"><span>By Event</span></h1>
+  <p class="psub">Match individual events across two years to see what grew, what shrank, what's new, and what didn't return.</p>
+  <div class="search-row" style="margin-bottom:18px;">
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);">From
+      <select id="evYearA"></select>
+    </label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);">To
+      <select id="evYearB"></select>
+    </label>
+    <span id="evMatchSummary" style="font-size:12.5px;color:var(--muted);align-self:center;"></span>
+  </div>
+  <div class="subtabs" id="evSubtabs">
+    <button class="subtab active" data-tab="matched">Matched events</button>
+    <button class="subtab" data-tab="grew">Top growers</button>
+    <button class="subtab" data-tab="declined">Top decliners</button>
+    <button class="subtab" data-tab="new">New this year</button>
+    <button class="subtab" data-tab="lost">Didn't return</button>
+  </div>
+  <div class="chip-row" id="evCatChips"></div>
+  <div class="search-row">
+    <input type="text" id="evSearch" placeholder="Search event name…">
+    <select id="evSort">
+      <option value="diff_desc">Sort: biggest CPO change</option>
+      <option value="diff_pct">Sort: biggest % change</option>
+      <option value="cpo_desc">Sort: highest CPO (newer year)</option>
+      <option value="name">Sort: name A-Z</option>
+    </select>
+  </div>
+  <div class="panel">
+    <div class="tbl-wrap"><table class="tbl" id="evTable"></table></div>
+  </div>
+</div>
+
+<!-- Settings -->
+<div id="settingsPage" class="page">
+  <div class="eyebrow">Configuration</div>
+  <h1 class="ptitle"><span>Data &amp; Settings</span></h1>
+  <p class="psub">Manage which years are stored, see what was loaded from each upload, and review category mapping.</p>
+
+  <div class="panel">
+    <div class="phead"><div class="ptit2">Stored years</div>
+      <button class="btn btn-dn" id="clearAllBtn">Clear all data</button>
+    </div>
+    <div id="storedYears"></div>
+  </div>
+
+  <div class="panel">
+    <div class="phead">
+      <div><div class="ptit2">Find &amp; re-rank events <span class="ptit2-sub">edit category for any individual event</span></div></div>
+      <span id="editCount" style="font-size:11px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em;"></span>
+    </div>
+    <div class="search-row" style="margin-bottom:14px;">
+      <input type="text" id="rerankSearch" placeholder="Search by event name…">
+      <select id="rerankYearFilter">
+        <option value="all">All years</option>
+      </select>
+    </div>
+    <div class="chip-row" id="rerankQuickFilter" style="margin-bottom:14px;"></div>
+    <div id="rerankList"></div>
+    <p style="font-size:11.5px;color:var(--muted);margin-top:14px;line-height:1.55;">
+      <strong style="color:var(--ink);">Heads up:</strong> changes you make here are saved in this browser. If you re-upload the same year later, the spreadsheet values will overwrite these edits — so for permanent changes, also fix the <code>Rank</code> column in your master file.
+    </p>
+  </div>
+
+  <div class="panel">
+    <div class="phead"><div class="ptit2">Last upload — sheet processing report</div></div>
+    <div id="lastUploadReport"><p style="color:var(--muted);font-size:12.5px;">No upload in this session yet. The most recent upload's processing report will appear here.</p></div>
+  </div>
+
+  <div class="panel">
+    <div class="phead"><div class="ptit2">Recommended workbook format</div></div>
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.6;">
+      For cleanest results, keep all events for a year on a single tab using these columns:
+      <code>Event</code>, <code>Start Date</code>, <code>End Date</code>, <code>Rank</code>, <code>Total</code>, <code>Booth</code>, <code>S/C</code>, <code>F/L</code>, <code>Other</code>, <code>Total Orders</code> (also accepted: <code>Total 2</code>, <code>Orders</code>).
+      The dashboard handles multi-tab files too, but a single master tab per year is fastest and least error-prone.
+    </p>
+  </div>
+
+  <div class="panel">
+    <div class="phead"><div class="ptit2">Category mapping</div></div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">The dashboard auto-normalizes these category codes from your <code>Rank</code> column:</p>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Recognized codes</th><th>Maps to</th></tr></thead>
+      <tbody>
+        <tr><td><code>E</code>, <code>E-Elite</code>, <code>E - Elite</code>, <code>Elite</code></td><td><span class="badge bb">Elite</span></td></tr>
+        <tr><td><code>K</code>, <code>K-Key</code>, <code>K - Key</code>, <code>K- Key</code>, <code>Key</code></td><td><span class="badge bb">Key</span></td></tr>
+        <tr><td><code>T</code>, <code>T-Traditional</code>, <code>T- Traditional</code>, <code>Traditional</code></td><td><span class="badge bb">Traditional</span></td></tr>
+        <tr><td><code>MM</code>, <code>MM - Mesa Marketplace</code>, <code>Mesa Marketplace</code></td><td><span class="badge bb">Mesa Marketplace</span></td></tr>
+        <tr><td><code>SE</code>, <code>SE - Service Event</code>, <code>Service Event</code></td><td><span class="badge bb">Service Event</span></td></tr>
+        <tr><td><code>M</code>, <code>M - Malls</code>, <code>Malls</code></td><td><span class="badge bb">Malls</span></td></tr>
+        <tr><td><code>RLT</code>, <code>Realtor</code></td><td><span class="badge bb">RLT</span></td></tr>
+        <tr><td><code>Industry</code>, <code>IND</code></td><td><span class="badge bb">Industry</span></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="panel">
+    <div class="phead"><div class="ptit2">How event matching works</div></div>
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.6;">
+      Events are matched across years by their name (the part after the leading ID like <code>00094424 -</code>).
+      The dashboard normalizes spacing, case, and punctuation so <code>Mesa Market Place Swapmeet-January</code>
+      and <code>Mesa Market Place Swapmeet - January</code> match. Month-specific events (like
+      <code>Mesa Market Place Swapmeet - February</code>) are treated as the same event year over year only when the month is the same.
+    </p>
+  </div>
+
+  <div class="panel">
+    <div class="phead"><div class="ptit2">About storage</div></div>
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.6;">
+      Your data is stored locally in this browser only — nothing is uploaded to a server. If you open this file in a different browser
+      or in a private/incognito window, you'll need to re-upload. To migrate your data to a different machine, copy/paste the JSON
+      from your browser's localStorage (key: <code>cutco_event_dashboard_v2</code>), or just re-upload your spreadsheet.
+    </p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+
+// ============================================
+// CONSTANTS
+// ============================================
+const STORAGE_KEY = 'cutco_event_dashboard_v2';
+const CAT_ORDER = ['Elite','Key','Traditional','Mesa Marketplace','Service Event','Malls','RLT','Industry','Other','Unknown'];
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const CAMPAIGNS = [
+  {id:1, name:'Campaign I',  short:'C-I',  months:[0,1,2,3],  span:'Jan–Apr'},
+  {id:2, name:'Campaign II', short:'C-II', months:[4,5,6,7],  span:'May–Aug'},
+  {id:3, name:'Campaign III',short:'C-III',months:[8,9,10,11],span:'Sep–Dec'},
+];
+
+// ============================================
+// STATE
+// ============================================
+const STATE = {
+  events: [],            // all events from all uploads, deduped
+  byYear: {},            // { year: [events] }
+  years: [],             // sorted ascending
+  primaryYear: null,     // year being analyzed
+  paceMode: false,       // when on, restricts other years to months active in primary
+  currentMonth: null,    // 0-11 for By Month detail
+  currentCampaign: 1,    // 1, 2, or 3 for By Campaign detail
+  catFilter: 'all',      // shared across Month and Campaign — locks views to one ranking
+  evYearA: null,
+  evYearB: null,
+  evSubTab: 'matched',
+  evCatFilter: 'all',
+  evSearch: '',
+  evSort: 'diff_desc',
+  lastSheetReport: null,
+  insightCompareYear: null,
+  matrixCompareYear: null,    // year used for the "vs YYYY %" column on Overview matrix tables
+  kpiHiddenYears: new Set(),  // years the user hid from the Overview KPI strip — primary year is never hideable
+  rerankSearch: '',
+  rerankYearFilter: 'all',
+  editedEventKeys: new Set(), // tracks which events have been manually re-ranked
+};
+
+// ============================================
+// CATEGORY / NAME NORMALIZATION
+// ============================================
+function normalizeCategory(raw){
+  if (!raw) return 'Other';
+  let s = String(raw).trim().toLowerCase().replace(/\s+/g,' ');
+  if (/^e[\s\-]/.test(s) || s === 'e' || s.includes('elite')) return 'Elite';
+  if (/^k[\s\-]/.test(s) || s === 'k' || s.includes('key')) return 'Key';
+  if (/^mm[\s\-]/.test(s) || s === 'mm' || s.includes('mesa')) return 'Mesa Marketplace';
+  if (/^se[\s\-]/.test(s) || s === 'se' || s.includes('service')) return 'Service Event';
+  if (s === 'm' || s.includes('mall')) return 'Malls';
+  if (/^t[\s\-]/.test(s) || s === 't' || s.includes('traditional')) return 'Traditional';
+  if (s.includes('rlt') || s.includes('realtor')) return 'RLT';
+  if (s.includes('industry') || s === 'ind') return 'Industry';
+  return 'Other';
+}
+
+function normalizeEventName(raw){
+  let s = String(raw||'').trim();
+  s = s.replace(/^\s*\d{4,8}\s*[\-–—]\s*/, ''); // strip leading "00094424 - "
+  s = s.toLowerCase();
+  s = s.replace(/[\-–—]+/g,' ').replace(/\s+/g,' ').trim();
+  return s;
+}
+
+function displayEventName(raw){
+  let s = String(raw||'').trim();
+  s = s.replace(/^\s*\d{4,8}\s*[\-–—]\s*/, '');
+  return s;
+}
+
+// ============================================
+// AUTO-CATEGORIZATION (fuzzy match against trained data)
+// ============================================
+
+// Build a dictionary mapping normalized event name -> most-common category,
+// from a corpus of already-categorized events. Skips 'Unknown' / 'Other'.
+function buildCategoryDictionary(events){
+  const groups = {};
+  for (const ev of events){
+    if (!ev.category || ev.category === 'Unknown' || ev.category === 'Other') continue;
+    const key = ev.eventNorm;
+    if (!key) continue;
+    if (!groups[key]) groups[key] = {};
+    groups[key][ev.category] = (groups[key][ev.category] || 0) + 1;
+  }
+  const dict = {};
+  for (const k in groups){
+    let best = null, bestCount = 0;
+    for (const cat in groups[k]){
+      if (groups[k][cat] > bestCount){ best = cat; bestCount = groups[k][cat]; }
+    }
+    dict[k] = best;
+  }
+  return dict;
+}
+
+// Strip month/season suffixes for base-name matching of recurring events
+function stripPeriodSuffix(normName){
+  return normName
+    .replace(/\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b\s*\d{0,4}$/i, '')
+    .replace(/\s+(spring|summer|fall|autumn|winter)\b\s*\d{0,4}$/i, '')
+    .replace(/\s+\d{4}$/, '') // trailing year
+    .trim();
+}
+
+// Try to find the right category for a new event by looking it up in the trained dictionary.
+// Returns { category, method } or null if no match.
+function lookupCategory(eventNorm, dict){
+  if (!eventNorm) return null;
+
+  // 1. Exact normalized match
+  if (dict[eventNorm]) return { category: dict[eventNorm], method: 'exact' };
+
+  // 2. Base-name match (strip month/season suffixes from both sides)
+  const base = stripPeriodSuffix(eventNorm);
+  if (base && base !== eventNorm && dict[base]) {
+    return { category: dict[base], method: 'base-name' };
+  }
+  // also try matching against the dict entries with their suffixes stripped
+  for (const k in dict){
+    if (stripPeriodSuffix(k) === base && base) {
+      return { category: dict[k], method: 'base-name' };
+    }
+  }
+
+  // 3. Fuzzy token overlap (Jaccard on meaningful tokens)
+  const tokens = new Set(eventNorm.split(/\s+/).filter(t => t.length >= 3));
+  if (tokens.size < 2) return null; // too short to fuzzy reliably
+  let bestKey = null, bestScore = 0;
+  for (const k in dict){
+    const kt = new Set(k.split(/\s+/).filter(t => t.length >= 3));
+    if (kt.size < 2) continue;
+    const overlap = [...tokens].filter(t => kt.has(t)).length;
+    const union = new Set([...tokens, ...kt]).size;
+    const score = overlap / union;
+    if (score > bestScore){ bestScore = score; bestKey = k; }
+  }
+  if (bestScore >= 0.7) return { category: dict[bestKey], method: 'fuzzy' };
+
+  return null;
+}
+
+// Last-resort fallback when both the spreadsheet rank cell AND the dictionary lookup
+// give us nothing. Match against keywords in the event name itself. Conservative —
+// only fires for high-confidence patterns where the name is unambiguous about category.
+// User added these rules: anything with "Mall" → Malls, anything with "Service Event" → Service Event.
+// Extended pattern matching also catches obvious variants like "Service & Sales Event" and
+// the Mesa Market Place Swapmeet series.
+function categorizeByNameHeuristic(eventNorm){
+  if (!eventNorm) return null;
+  const n = eventNorm.toLowerCase();
+
+  // Mesa Market Place Swapmeet — the entire monthly series uses this exact phrase.
+  if (/\bmesa\s+market\s*place\b/.test(n) || /\bmesa\s+marketplace\b/.test(n)) {
+    return { category: 'Mesa Marketplace', method: 'name-heuristic' };
+  }
+  // Service Event / Service & Sales Event — anything containing "service" plus
+  // "event" or "sales" lands here. "Service Event" alone also matches.
+  if (/\bservice\b.*\b(event|sales)\b/.test(n) || /\bservice\s+event\b/.test(n)) {
+    return { category: 'Service Event', method: 'name-heuristic' };
+  }
+  // Mall events — "Mall" as a whole word (not "Pall Mall" or part of another word).
+  // \b ensures it doesn't match "smaller" or similar.
+  if (/\bmall\b/.test(n)) {
+    return { category: 'Malls', method: 'name-heuristic' };
+  }
+  return null;
+}
+
+function excelToDate(val){
+  if (val == null || val === '') return null;
+  if (val instanceof Date) return val;
+  if (typeof val === 'number') {
+    // Excel serial: days since Dec 30 1899 (with Lotus 1-2-3 leap-year bug compensation)
+    const utc_days = Math.floor(val - 25569);
+    const utc_value = utc_days * 86400;
+    const date_info = new Date(utc_value * 1000);
+    if (isNaN(date_info.getTime())) return null;
+    return date_info;
+  }
+  // Try parsing as string
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// ============================================
+// SHEET FILTERING
+// ============================================
+const SKIP_SHEET_PATTERNS = [
+  /overview/i, /comparison/i, /comparsion/i, /summary/i,
+  /^year\s*total/i, /^totals?$/i, /^pivot/i,
+];
+function shouldSkipSheet(sheetName){
+  for (const pat of SKIP_SHEET_PATTERNS) if (pat.test(sheetName)) return true;
+  return false;
+}
+
+// ============================================
+// PARSER
+// ============================================
+function parseWorkbook(wb, dictionary){
+  const events = [];
+  const sheetReport = [];
+
+  const matchTotal = c => c === 'total' || c === 'total cpo' || c === 'cpo';
+  const matchTotal2 = c => c === 'total 2' || c === 'total orders' || c === 'orders' || c === '# orders' || c === 'num orders';
+  const matchEvent = c => c === 'event';
+  const matchRank = c => c === 'rank';
+
+  for (const sheetName of wb.SheetNames) {
+    if (shouldSkipSheet(sheetName)) {
+      sheetReport.push({sheet: sheetName, status: 'skipped', reason: 'summary/derived view', count: 0});
+      continue;
+    }
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
+    if (rows.length < 2) {
+      sheetReport.push({sheet: sheetName, status: 'empty', reason: 'no data rows', count: 0});
+      continue;
+    }
+
+    let headerIdx = -1, headers = null;
+    for (let i = 0; i < Math.min(rows.length, 20); i++) {
+      const r = rows[i];
+      if (!r) continue;
+      const lc = r.map(c => (c == null ? '' : String(c).toLowerCase().trim()));
+      if (lc.some(matchEvent) && lc.some(matchTotal) && lc.some(matchRank)) {
+        headerIdx = i; headers = lc; break;
+      }
+    }
+    if (headerIdx === -1) {
+      sheetReport.push({sheet: sheetName, status: 'no-match', reason: 'no Event/Total/Rank header found', count: 0});
+      continue;
+    }
+
+    let colEvent, colStart, colEnd, colRank, colTotal, colTotal2, colBooth, colSC, colFL, colOther, colBooth2, colSC2, colFL2, colOther2;
+    const recompute = (h) => {
+      colEvent = h.findIndex(matchEvent);
+      colStart = h.findIndex(x => x === 'start date');
+      colEnd = h.findIndex(x => x === 'end date');
+      colRank = h.findIndex(matchRank);
+      colTotal = h.findIndex(matchTotal);
+      colTotal2 = h.findIndex(matchTotal2);
+      colBooth = h.findIndex(x => x === 'booth');
+      colSC = h.findIndex(x => x === 's/c');
+      colFL = h.findIndex(x => x === 'f/l');
+      colOther = h.findIndex(x => x === 'other');
+      colBooth2 = h.findIndex(x => x === 'booth 2');
+      colSC2 = h.findIndex(x => x === 's/c 2');
+      colFL2 = h.findIndex(x => x === 'f/l 2');
+      colOther2 = h.findIndex(x => x === 'other 2');
+    };
+    recompute(headers);
+
+    if (colEvent < 0 || colTotal < 0 || colRank < 0) {
+      sheetReport.push({sheet: sheetName, status: 'no-match', reason: 'missing required columns', count: 0});
+      continue;
+    }
+
+    let added = 0;
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r) continue;
+      const eventRaw = r[colEvent];
+
+      if (typeof eventRaw === 'string' && eventRaw.toLowerCase().trim() === 'event') {
+        const lc = r.map(c => (c == null ? '' : String(c).toLowerCase().trim()));
+        if (lc.some(matchEvent) && lc.some(matchTotal) && lc.some(matchRank)) {
+          headers = lc; recompute(headers); continue;
+        }
+      }
+      if (eventRaw == null || String(eventRaw).trim() === '') continue;
+
+      // Skip summary/totals rows that look like events but are actually footer aggregations.
+      // Some spreadsheet exports include rows like "Totals", "Grand Total", "Averages per Event"
+      // at the bottom — sometimes with a fabricated date that lands in a real year, which would
+      // wipe out that year's data when the upload's "replace year" logic kicks in.
+      // We match against the event name only; these phrases never appear as legitimate events.
+      const evLower = String(eventRaw).toLowerCase().trim();
+      const SUMMARY_ROW_PATTERNS = [
+        /^totals?$/,                           // "Total" or "Totals"
+        /^grand\s*totals?$/,                   // "Grand Total"
+        /^sub[\s-]*totals?$/,                  // "Subtotal" or "Sub Total"
+        /^averages?$/,                         // "Average" or "Averages"
+        /^averages?\s+per\s+event$/,           // "Averages per Event"
+        /^(year|month|annual|quarterly)\s+totals?$/,  // "Year Total", "Annual Total"
+        /^summary$/,                           // "Summary"
+      ];
+      if (SUMMARY_ROW_PATTERNS.some(re => re.test(evLower))) {
+        continue;
+      }
+
+      const startDate = colStart >= 0 ? excelToDate(r[colStart]) : null;
+      if (!startDate) continue;
+      const endDate = colEnd >= 0 ? excelToDate(r[colEnd]) : null;
+      const rank = r[colRank];
+      const total = Number(r[colTotal]) || 0;
+      const orders = colTotal2 >= 0 ? (Number(r[colTotal2]) || 0) : 0;
+
+      const eventNorm = normalizeEventName(eventRaw);
+
+      // Decide the category. Layered fallback strategy:
+      //   1. If the spreadsheet provided a Rank cell, use it (user's explicit choice).
+      //   2. If Rank is blank AND a dictionary from prior years exists, look it up
+      //      (matches her past categorization decisions).
+      //   3. If still no match, try the name-keyword heuristic
+      //      (catches obvious patterns like "Mall" → Malls, "Service Event" → Service Event).
+      //   4. Last resort: 'Unknown' so the user can review/fix it in Settings.
+      const rankIsBlank = rank == null || String(rank).trim() === '';
+      let category, autoMethod = null;
+      if (!rankIsBlank) {
+        category = normalizeCategory(rank);
+      } else {
+        // Try dictionary first if we have one
+        if (dictionary) {
+          const lookup = lookupCategory(eventNorm, dictionary);
+          if (lookup) {
+            category = lookup.category;
+            autoMethod = lookup.method;
+          }
+        }
+        // Then heuristic if we still don't have a category
+        if (!category) {
+          const heur = categorizeByNameHeuristic(eventNorm);
+          if (heur) {
+            category = heur.category;
+            autoMethod = heur.method;
+          }
+        }
+        // Last resort
+        if (!category) {
+          category = 'Unknown';
+        }
+      }
+
+      events.push({
+        sheet: sheetName,
+        eventRaw: String(eventRaw),
+        eventDisplay: displayEventName(eventRaw),
+        eventNorm,
+        startDate: startDate.toISOString(),
+        endDate: endDate ? endDate.toISOString() : null,
+        year: startDate.getFullYear(),
+        month: startDate.getMonth(),
+        rankRaw: rank == null ? '' : String(rank),
+        category,
+        autoAssigned: autoMethod, // null | 'exact' | 'base-name' | 'fuzzy' | 'name-heuristic'
+        total, orders,
+        booth: colBooth >= 0 ? (Number(r[colBooth]) || 0) : 0,
+        sc: colSC >= 0 ? (Number(r[colSC]) || 0) : 0,
+        fl: colFL >= 0 ? (Number(r[colFL]) || 0) : 0,
+        other: colOther >= 0 ? (Number(r[colOther]) || 0) : 0,
+        booth2: colBooth2 >= 0 ? (Number(r[colBooth2]) || 0) : 0,
+        sc2: colSC2 >= 0 ? (Number(r[colSC2]) || 0) : 0,
+        fl2: colFL2 >= 0 ? (Number(r[colFL2]) || 0) : 0,
+        other2: colOther2 >= 0 ? (Number(r[colOther2]) || 0) : 0,
+      });
+      added++;
+    }
+    sheetReport.push({sheet: sheetName, status: 'ok', reason: '', count: added});
+  }
+
+  // Dedupe within this upload (same event row may appear in multiple sheets)
+  const seen = new Set();
+  const unique = [];
+  for (const ev of events) {
+    const key = ev.eventRaw.replace(/\s+/g,'').toLowerCase() + '|' +
+                ev.startDate + '|' + ev.total.toFixed(0) + '|' + ev.orders.toFixed(0);
+    if (seen.has(key)) continue;
+    seen.add(key); unique.push(ev);
+  }
+
+  return {events: unique, sheetReport};
+}
+
+// ============================================
+// AGGREGATIONS
+// ============================================
+function bucketByYear(events){
+  const out = {};
+  for (const ev of events) {
+    if (!ev.year) continue;
+    (out[ev.year] = out[ev.year] || []).push(ev);
+  }
+  return out;
+}
+
+function activeMonthsForYear(events){
+  // Returns sorted array of month indices (0-11) that have at least one event
+  const set = new Set(events.map(e => e.month));
+  return [...set].sort((a,b)=>a-b);
+}
+
+function filterToMonths(events, monthSet){
+  if (!monthSet || monthSet.length === 12) return events;
+  const lookup = new Set(monthSet);
+  return events.filter(e => lookup.has(e.month));
+}
+
+function aggByCategory(events){
+  const agg = {};
+  for (const cat of CAT_ORDER) agg[cat] = {cpo:0, orders:0, count:0};
+  for (const ev of events) {
+    const c = ev.category || 'Other';
+    if (!agg[c]) agg[c] = {cpo:0, orders:0, count:0};
+    agg[c].cpo += ev.total;
+    agg[c].orders += ev.orders;
+    agg[c].count += 1;
+  }
+  return agg;
+}
+
+function aggMonthByCategory(events, monthIdx){
+  return aggByCategory(events.filter(e => e.month === monthIdx));
+}
+
+function aggCampaign(events, campaignId){
+  const camp = CAMPAIGNS.find(c => c.id === campaignId);
+  if (!camp) return aggByCategory([]);
+  const months = new Set(camp.months);
+  return aggByCategory(events.filter(e => months.has(e.month)));
+}
+
+function totalsFor(events){
+  let cpo=0, orders=0, count=0;
+  for (const e of events){ cpo+=e.total; orders+=e.orders; count++; }
+  return {cpo, orders, count, avg: orders ? cpo/orders : 0};
+}
+
+function matchEventsByName(eventsA, eventsB){
+  // Count occurrences per event name within each year. This lets us choose
+  // a smart matching key:
+  //   - If a name occurs at most once in BOTH years → match by name only,
+  //     so a single annual event that shifts months (e.g. Feb→Mar) still matches.
+  //   - If a name occurs multiple times in either year → match by name+month
+  //     to keep the multiple instances as separate entities.
+  const countByName = (arr) => {
+    const c = {};
+    for (const ev of arr) c[ev.eventNorm] = (c[ev.eventNorm] || 0) + 1;
+    return c;
+  };
+  const cntA = countByName(eventsA);
+  const cntB = countByName(eventsB);
+  const useNameOnly = (norm) => (cntA[norm] || 0) <= 1 && (cntB[norm] || 0) <= 1;
+
+  const groupBy = arr => {
+    const out = {};
+    for (const ev of arr){
+      const key = useNameOnly(ev.eventNorm) ? ev.eventNorm : (ev.eventNorm + '|' + ev.month);
+      if (!out[key]) {
+        out[key] = {
+          key, events:[ev], total:ev.total, orders:ev.orders,
+          eventDisplay:ev.eventDisplay, category:ev.category,
+          month:ev.month, eventNorm: ev.eventNorm
+        };
+      } else {
+        out[key].events.push(ev);
+        out[key].total += ev.total;
+        out[key].orders += ev.orders;
+      }
+    }
+    return out;
+  };
+  const ga = groupBy(eventsA), gb = groupBy(eventsB);
+  const matched = [], onlyB = [], onlyA = [];
+  for (const k in gb) {
+    if (ga[k]) matched.push({key:k, a:ga[k], b:gb[k]});
+    else onlyB.push(gb[k]);
+  }
+  for (const k in ga) if (!gb[k]) onlyA.push(ga[k]);
+  return {matched, newOnes: onlyB, lostOnes: onlyA};
+}
+
+// ============================================
+// FORMATTERS
+// ============================================
+function fmt$(v){ if(!isFinite(v)) return '$0'; const n = Math.round(v); return '$' + n.toLocaleString('en-US'); }
+function fmtN(v){ if(!isFinite(v)) return '0'; return Math.round(v).toLocaleString('en-US'); }
+function fmt$dec(v){ if(!isFinite(v)) return '$0.00'; return '$' + v.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2}); }
+function fmtPct(v){ if(!isFinite(v)) return '—'; const sign = v >= 0 ? '+' : ''; return sign + (v*100).toFixed(1) + '%'; }
+function fmtDelta$(v){ if(!isFinite(v)) return '—'; const sign = v>=0 ? '+' : '-'; return sign + '$' + Math.abs(Math.round(v)).toLocaleString('en-US'); }
+function deltaClass(v){ if(v>0) return 'delta-up'; if(v<0) return 'delta-dn'; return 'delta-flat'; }
+function deltaArrow(v){ if(v>0) return '▲'; if(v<0) return '▼'; return '•'; }
+function pctChange(now, then){ if(!then) return null; return (now-then)/then; }
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function showToast(msg, type){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (type||'');
+  setTimeout(() => { t.className = 'toast ' + (type||''); }, 4500);
+}
+
+// ============================================
+// STORAGE
+// ============================================
+function saveStorage(){
+  try {
+    const payload = {
+      events: STATE.events,
+      editedEventKeys: [...STATE.editedEventKeys],
+      kpiHiddenYears: [...STATE.kpiHiddenYears],
+      lastUpdated: new Date().toISOString()
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  } catch (e) {
+    console.error('Storage save failed', e);
+    showToast('Could not save data — your browser may be blocking storage.', 'error');
+  }
+}
+function loadStorage(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj.events || !Array.isArray(obj.events)) return false;
+    STATE.events = obj.events;
+    STATE.editedEventKeys = new Set(obj.editedEventKeys || []);
+    STATE.kpiHiddenYears = new Set((obj.kpiHiddenYears || []).map(Number));
+    rebuildDerived();
+    return STATE.events.length > 0;
+  } catch (e) {
+    console.error('Storage load failed', e);
+    return false;
+  }
+}
+function clearStorage(){
+  localStorage.removeItem(STORAGE_KEY);
+  STATE.events = [];
+  STATE.editedEventKeys = new Set();
+  STATE.kpiHiddenYears = new Set();
+  rebuildDerived();
+}
+function removeYear(year){
+  STATE.events = STATE.events.filter(e => e.year !== year);
+  // Drop any edit markers that no longer correspond to a stored event
+  const validKeys = new Set(STATE.events.map(eventKey));
+  STATE.editedEventKeys = new Set([...STATE.editedEventKeys].filter(k => validKeys.has(k)));
+  // Drop the year from KPI hidden set so it doesn't linger if the year is later re-added
+  STATE.kpiHiddenYears.delete(year);
+  saveStorage();
+  rebuildDerived();
+}
+
+function rebuildDerived(){
+  STATE.byYear = bucketByYear(STATE.events);
+  STATE.years = Object.keys(STATE.byYear).map(Number).sort((a,b)=>a-b);
+  if (STATE.primaryYear == null || !STATE.byYear[STATE.primaryYear]) {
+    STATE.primaryYear = STATE.years[STATE.years.length - 1] || null;
+  }
+  if (STATE.evYearA == null || !STATE.byYear[STATE.evYearA]) {
+    STATE.evYearA = STATE.years[STATE.years.length - 2] || STATE.years[0] || null;
+  }
+  if (STATE.evYearB == null || !STATE.byYear[STATE.evYearB]) {
+    STATE.evYearB = STATE.years[STATE.years.length - 1] || null;
+  }
+  // Default the matrix compare year to the most recent non-primary year (e.g. 2025 when primary is 2026).
+  // If the user previously chose one that no longer exists, reset.
+  const nonPrimary = STATE.years.filter(y => y !== STATE.primaryYear);
+  if (STATE.matrixCompareYear == null || !nonPrimary.includes(STATE.matrixCompareYear)) {
+    STATE.matrixCompareYear = nonPrimary[nonPrimary.length - 1] || null;
+  }
+  // Auto-enable pace mode when primary year is partial (less than 12 months of data)
+  // and other years have more months — this gives the user the like-for-like view by default.
+  if (STATE.primaryYear != null) {
+    const primEvs = STATE.byYear[STATE.primaryYear] || [];
+    const primMonths = activeMonthsForYear(primEvs).length;
+    const otherYearsHaveMore = STATE.years.some(y => {
+      if (y === STATE.primaryYear) return false;
+      return activeMonthsForYear(STATE.byYear[y]||[]).length > primMonths;
+    });
+    if (primMonths > 0 && primMonths < 12 && otherYearsHaveMore) {
+      STATE.paceMode = true;
+    }
+  }
+}
+
+// ============================================
+// FILE UPLOAD HANDLING
+// ============================================
+function handleFile(file){
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array', cellDates:false});
+
+      // Build a category dictionary from already-stored events so blank ranks
+      // in this upload can be auto-categorized from prior years' training data.
+      const dictionary = buildCategoryDictionary(STATE.events);
+      const dictionarySize = Object.keys(dictionary).length;
+
+      const {events: newEvents, sheetReport} = parseWorkbook(wb, dictionarySize > 0 ? dictionary : null);
+      STATE.lastSheetReport = sheetReport;
+
+      if (newEvents.length === 0) {
+        showToast('No event data found. Check that your sheets have Event/Start Date/Rank/Total columns.', 'error');
+        renderSettings();
+        return;
+      }
+
+      // Count auto-assignments and unknowns for the toast feedback
+      const autoCount = newEvents.filter(e => e.autoAssigned).length;
+      const unknownCount = newEvents.filter(e => e.category === 'Unknown').length;
+
+      // Group new events by year, then REPLACE that year in storage
+      const newByYear = bucketByYear(newEvents);
+      const yearsInUpload = Object.keys(newByYear).map(Number).sort((a,b)=>a-b);
+
+      // SAFETY GUARDRAIL — protects against silent data wipe.
+      // Two scenarios trigger a confirmation:
+      //   (A) Year has <=5 incoming events but >=20 existing — likely a phantom row
+      //       (e.g. a "Totals" summary row dated to that year)
+      //   (B) Upload spans multiple years AND any year has very few events (<10).
+      //       Spreadsheets normally cover one year per file. Multiple-year uploads
+      //       almost always mean a stray date got picked up from a footer/header row,
+      //       and the small-count year is the contamination.
+      const warnings = [];
+      for (const y of yearsInUpload) {
+        const existing = STATE.events.filter(e => e.year === y).length;
+        const incoming = newByYear[y].length;
+        // (A) Massive shrink:
+        if (existing >= 20 && incoming <= 5) {
+          warnings.push(`  • ${y}: would replace ${existing} existing events with only ${incoming} new event${incoming===1?'':'s'} — likely a stray row in your file`);
+        }
+      }
+      // (B) Multi-year upload with a tiny year:
+      if (yearsInUpload.length > 1) {
+        const counts = yearsInUpload.map(y => `${y} (${newByYear[y].length})`).join(', ');
+        const smallYears = yearsInUpload.filter(y => newByYear[y].length < 10);
+        if (smallYears.length > 0) {
+          warnings.push(`  • This file contains events from multiple years: ${counts}.\n    Year${smallYears.length===1?'':'s'} ${smallYears.join(', ')} ${smallYears.length===1?'has':'have'} fewer than 10 events — usually a sign that a summary or header row got picked up. Real spreadsheets normally cover one year.`);
+        }
+      }
+
+      if (warnings.length) {
+        const proceed = confirm(
+          `Heads up — this upload looks unusual:\n\n${warnings.join('\n\n')}\n\n` +
+          `Click Cancel to abort and check your file. Continue anyway?`
+        );
+        if (!proceed) {
+          showToast('Upload cancelled. No data was changed.', 'warn');
+          return;
+        }
+      }
+
+      // Drop existing events for those years
+      STATE.events = STATE.events.filter(e => !yearsInUpload.includes(e.year));
+      // Add the new events
+      STATE.events = STATE.events.concat(newEvents);
+      // Drop edit markers for events that no longer exist (re-uploaded years overwrite edits)
+      const validKeys = new Set(STATE.events.map(eventKey));
+      STATE.editedEventKeys = new Set([...STATE.editedEventKeys].filter(k => validKeys.has(k)));
+
+      saveStorage();
+      rebuildDerived();
+
+      const yearStr = yearsInUpload.map(y => `${y} (${newByYear[y].length})`).join(', ');
+      let msg = `Loaded years: ${yearStr}. Vault now has ${STATE.years.join(', ')}.`;
+      let toastType = 'success';
+      if (autoCount > 0 || unknownCount > 0) {
+        const parts = [];
+        if (autoCount > 0) parts.push(`${autoCount} auto-categorized`);
+        if (unknownCount > 0) parts.push(`${unknownCount} marked Unknown — review in Settings`);
+        msg += ' ' + parts.join(', ') + '.';
+        if (unknownCount > 0) toastType = 'warn';
+      }
+      showToast(msg, toastType);
+
+      // Switch to overview if we were on empty page
+      const active = document.querySelector('.tab.active');
+      if (!active) setActivePage('overview');
+      else refreshAll();
+
+      updateNavChrome();
+    } catch (err) {
+      console.error(err);
+      showToast('Could not parse file: ' + err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ============================================
+// NAV CHROME
+// ============================================
+function updateNavChrome(){
+  const has = STATE.events.length > 0;
+  document.getElementById('topUpload').style.display = has ? 'inline-flex' : 'none';
+  document.getElementById('yearMgr').style.display = has ? 'flex' : 'none';
+
+  if (has){
+    const sel = document.getElementById('yrPrimary');
+    sel.innerHTML = STATE.years.map(y => `<option value="${y}" ${y===STATE.primaryYear?'selected':''}>${y}</option>`).join('');
+  }
+}
+
+function setActivePage(page){
+  ['empty','overview','month','campaign','event','settings'].forEach(p => {
+    const el = document.getElementById(p + 'Page');
+    if (el) el.classList.toggle('active', p === page);
+  });
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.page === page);
+  });
+
+  if (STATE.events.length === 0) {
+    // No data — force empty page regardless of tab clicked, but show settings if requested
+    if (page === 'settings') {
+      document.getElementById('emptyPage').classList.remove('active');
+      document.getElementById('settingsPage').classList.add('active');
+      renderSettings();
+    } else {
+      document.getElementById('emptyPage').classList.add('active');
+      ['overview','month','campaign','event','settings'].forEach(p => {
+        document.getElementById(p + 'Page').classList.remove('active');
+      });
+    }
+    return;
+  }
+
+  if (page === 'overview') renderOverview();
+  if (page === 'month') renderMonth();
+  if (page === 'campaign') renderCampaign();
+  if (page === 'event') renderEvent();
+  if (page === 'settings') renderSettings();
+}
+
+function refreshAll(){
+  const active = document.querySelector('.tab.active');
+  if (active) setActivePage(active.dataset.page);
+  else setActivePage('overview');
+}
+
+// ============================================
+// PACE LOGIC
+// ============================================
+function getActiveScope(){
+  // Returns { years: [...], months: Set or null, label: string }
+  // If paceMode is on AND primary year is partial, lock all years to primary's months
+  const primary = STATE.primaryYear;
+  if (!primary) return {years: STATE.years, months: null, label: ''};
+  const evs = STATE.byYear[primary] || [];
+  const am = activeMonthsForYear(evs);
+  const isPartial = am.length > 0 && am.length < 12;
+
+  if (STATE.paceMode && isPartial) {
+    return {
+      years: STATE.years,
+      months: am,
+      label: `Like-for-like: through ${MONTH_NAMES[am[am.length-1]]} (${am.length} month${am.length===1?'':'s'})`,
+      isPartial: true,
+    };
+  }
+  return {years: STATE.years, months: null, label: 'Full year', isPartial};
+}
+
+function eventsInScope(year, scope){
+  const evs = STATE.byYear[year] || [];
+  if (!scope.months) return evs;
+  return filterToMonths(evs, scope.months);
+}
+
+// Year-end projection for the primary year, based on prior years' seasonal patterns.
+// Returns { cpo, orders, avg, perYear } where perYear is breakdown by reference year, or null if not projectable.
+//
+// Method (per metric, e.g. CPO):
+//   For each FULL prior year P, compute the fraction of P that occurred in months 1..currentMonth:
+//       fracP = sum(P, Jan..currentMonth) / sum(P, full year)
+//   Then primary's projection using P as the reference is:
+//       proj_P = primary_YTD / fracP
+//   Final projection = average of proj_P across all viable prior years (those that have data
+//   covering both the YTD window AND additional months beyond it).
+//
+// We use the average of multiple prior years (when available) for stability — different years
+// have different seasonal shapes (e.g. 2024 had 47.8% by Apr, 2025 had 44.9%). The range between
+// them is reported as `low` and `high` to convey uncertainty.
+function computeProjection(){
+  const primary = STATE.primaryYear;
+  if (!primary) return null;
+  const primaryEvs = STATE.byYear[primary] || [];
+  const am = activeMonthsForYear(primaryEvs);
+  if (am.length === 0 || am.length >= 12) return null; // need partial primary year to project
+  const lastMonth = am[am.length - 1]; // 0-indexed (e.g. 3 for April)
+  const ytdMonthSet = new Set(am);
+
+  // Aggregate primary's YTD totals
+  const sumOver = (evs, predicate) => evs.filter(predicate).reduce(
+    (s,e) => ({cpo: s.cpo + (e.total||0), orders: s.orders + (e.orders||0), count: s.count + 1}),
+    {cpo:0, orders:0, count:0}
+  );
+  const primYTD = sumOver(primaryEvs, e => ytdMonthSet.has(e.month));
+
+  // For each prior year, compute the seasonal fraction and projection
+  const perYear = [];
+  for (const y of STATE.years) {
+    if (y === primary) continue;
+    if (STATE.kpiHiddenYears.has(y)) continue; // honor user's toggle
+    const evs = STATE.byYear[y] || [];
+    const ymonths = activeMonthsForYear(evs);
+    if (ymonths.length === 0) continue;
+    // Reference year must cover at least the same YTD window AND more months,
+    // otherwise we can't extrapolate — skip equally-partial reference years.
+    if (ymonths.length <= am.length) continue;
+
+    const yYTD = sumOver(evs, e => ytdMonthSet.has(e.month));
+    const yFull = sumOver(evs, () => true);
+    if (yYTD.cpo === 0 || yFull.cpo === 0) continue;
+
+    const cpoFrac    = yYTD.cpo    / yFull.cpo;
+    const ordersFrac = yYTD.orders / yFull.orders;
+    perYear.push({
+      refYear: y,
+      cpoFrac, ordersFrac,
+      projCpo:    primYTD.cpo    / cpoFrac,
+      projOrders: primYTD.orders / ordersFrac,
+      yFull,
+    });
+  }
+
+  if (perYear.length === 0) return null;
+
+  const avg = (arr) => arr.reduce((s,x)=>s+x,0) / arr.length;
+  const cpos    = perYear.map(p => p.projCpo);
+  const orders  = perYear.map(p => p.projOrders);
+  const projCpo    = avg(cpos);
+  const projOrders = avg(orders);
+
+  return {
+    primary,
+    lastMonth,
+    monthsCovered: am.length,
+    primYTD,
+    perYear,
+    projCpo,
+    projOrders,
+    projAvg: projOrders ? projCpo / projOrders : 0,
+    cpoLow: Math.min(...cpos),
+    cpoHigh: Math.max(...cpos),
+    ordersLow: Math.min(...orders),
+    ordersHigh: Math.max(...orders),
+  };
+}
+
+// Filter events to the current category lock (or pass through if 'all')
+function filterByCat(events){
+  if (STATE.catFilter === 'all') return events;
+  return events.filter(e => e.category === STATE.catFilter);
+}
+
+// =================================================
+// AUTO INSIGHTS — rule-based analysis of the data
+// =================================================
+function generateInsights(primaryYear, compareYear, scope){
+  const insights = [];
+  const primEvs = eventsInScope(primaryYear, scope);
+  const compEvs = eventsInScope(compareYear, scope);
+  const tP = totalsFor(primEvs);
+  const tC = totalsFor(compEvs);
+
+  if (tC.cpo === 0 && tP.cpo === 0) {
+    insights.push({sev:'neutral', icon:'ℹ️', title:`No data to compare`, text:`Neither ${primaryYear} nor ${compareYear} has events in the current scope.`});
+    return insights;
+  }
+  if (tC.cpo === 0) {
+    insights.push({sev:'neutral', icon:'ℹ️', title:`No ${compareYear} data in current scope`, text:`Try toggling pace mode or picking a different comparison year.`});
+    return insights;
+  }
+
+  // 1. HEADLINE — overall direction
+  const pctCpo = (tP.cpo - tC.cpo) / tC.cpo;
+  const pctOrd = tC.orders ? (tP.orders - tC.orders) / tC.orders : null;
+  const pctAvg = tC.avg ? (tP.avg - tC.avg) / tC.avg : null;
+  const pctCnt = tC.count ? (tP.count - tC.count) / tC.count : null;
+
+  let dir, dirIcon, dirSev;
+  if (pctCpo > 0.05) { dir = `up <strong>${fmtPct(pctCpo)}</strong>`; dirIcon = '📈'; dirSev = 'positive'; }
+  else if (pctCpo < -0.05) { dir = `down <strong>${fmtPct(pctCpo)}</strong>`; dirIcon = '📉'; dirSev = 'negative'; }
+  else { dir = `roughly flat (${fmtPct(pctCpo)})`; dirIcon = '➖'; dirSev = 'neutral'; }
+  const scopeNote = scope.isPartial && scope.months ? ` through ${MONTH_NAMES[scope.months[scope.months.length-1]]}` : '';
+  insights.push({
+    sev: dirSev,
+    icon: dirIcon,
+    title: `Headline: ${primaryYear} CPO is ${dir} vs ${compareYear}${scopeNote}`,
+    text: `${fmt$(tP.cpo)} across ${tP.count} events vs ${fmt$(tC.cpo)} across ${tC.count}.`,
+  });
+
+  // 2. DECOMPOSITION — orders vs avg order
+  if (pctOrd != null && pctAvg != null) {
+    if (pctOrd > 0.05 && pctAvg > 0.05) {
+      insights.push({sev:'positive', icon:'⭐', title:`Both volume AND ticket size are up`, text:`Orders ${fmtPct(pctOrd)}, avg order ${fmtPct(pctAvg)}. You're working more transactions AND each one is bigger — best of both worlds.`});
+    } else if (pctOrd < -0.05 && pctAvg < -0.05) {
+      insights.push({sev:'negative', icon:'⚠️', title:`Both volume AND ticket size are down`, text:`Orders ${fmtPct(pctOrd)}, avg order ${fmtPct(pctAvg)}. Fewer transactions AND smaller — worth investigating which categories are dragging.`});
+    } else if (pctAvg > 0.07 && pctOrd <= 0.02) {
+      insights.push({sev:'positive', icon:'💎', title:`Avg order is up ${fmtPct(pctAvg)} despite flat/lower order count`, text:`Customers are buying bigger when they buy. Demo quality may be improving, or your event mix is shifting toward higher-ticket categories.`});
+    } else if (pctAvg < -0.07 && pctOrd >= -0.02) {
+      insights.push({sev:'caution', icon:'🔍', title:`Order count steady/up but avg order is down ${fmtPct(pctAvg)}`, text:`More volume but smaller tickets. Could be event mix shifting toward smaller-ticket categories, or customers becoming more cautious.`});
+    }
+  }
+
+  // 3. CATEGORY LEADERS & LAGGARDS (by absolute $ change)
+  const aggP = aggByCategory(primEvs);
+  const aggC = aggByCategory(compEvs);
+  const catChanges = [];
+  for (const cat of CAT_ORDER) {
+    const a = (aggP[cat]||{}).cpo || 0;
+    const b = (aggC[cat]||{}).cpo || 0;
+    if (a === 0 && b === 0) continue;
+    const diff = a - b;
+    const pct = b ? diff/b : null;
+    catChanges.push({cat, a, b, diff, pct});
+  }
+  const gainers = catChanges.filter(c => c.diff > 0).sort((x,y) => y.diff - x.diff);
+  const decliners = catChanges.filter(c => c.diff < 0).sort((x,y) => x.diff - y.diff);
+
+  if (gainers.length && gainers[0].diff > 1000) {
+    const g = gainers[0];
+    insights.push({sev:'positive', icon:'🏆', title:`${g.cat} is your biggest gainer`, text:`${fmt$(g.a)} in ${primaryYear} vs ${fmt$(g.b)} in ${compareYear} — that's ${fmtDelta$(g.diff)}${g.pct==null?'':' ('+fmtPct(g.pct)+')'}.`});
+  }
+  if (decliners.length && decliners[0].diff < -1000) {
+    const d = decliners[0];
+    insights.push({sev:'negative', icon:'📉', title:`${d.cat} is your biggest decline`, text:`${fmt$(d.a)} in ${primaryYear} vs ${fmt$(d.b)} in ${compareYear} — that's ${fmtDelta$(d.diff)}${d.pct==null?'':' ('+fmtPct(d.pct)+')'}.`});
+  }
+
+  // 4. AVG ORDER WINS BY CATEGORY (where customers are spending bigger per visit)
+  let bestAvgRise = null;
+  for (const cat of CAT_ORDER) {
+    const a = aggP[cat], b = aggC[cat];
+    if (!a || !b || !a.orders || !b.orders) continue;
+    if (a.orders < 5 || b.orders < 5) continue; // need volume to be meaningful
+    const avgA = a.cpo / a.orders;
+    const avgB = b.cpo / b.orders;
+    const pct = (avgA - avgB) / avgB;
+    if (pct > 0.10 && (!bestAvgRise || pct > bestAvgRise.pct)) {
+      bestAvgRise = {cat, avgA, avgB, pct};
+    }
+  }
+  if (bestAvgRise) {
+    insights.push({sev:'positive', icon:'💰', title:`${bestAvgRise.cat} avg order rose ${fmtPct(bestAvgRise.pct)}`, text:`${fmt$dec(bestAvgRise.avgA)} per order in ${primaryYear} vs ${fmt$dec(bestAvgRise.avgB)} in ${compareYear}. Customers are upgrading what they buy in this category.`});
+  }
+
+  // 5. EVENT-LEVEL CALLOUTS
+  const m = matchEventsByName(compEvs, primEvs);  // a=compare, b=primary
+
+  const matchedGrew = m.matched
+    .filter(x => x.b.total > x.a.total && x.a.total > 0)
+    .sort((x,y) => (y.b.total - y.a.total) - (x.b.total - x.a.total));
+  if (matchedGrew.length) {
+    const top = matchedGrew[0];
+    const dPct = (top.b.total - top.a.total) / top.a.total;
+    insights.push({sev:'positive', icon:'🚀', title:`Top growing event: ${top.b.eventDisplay}`, text:`${fmt$(top.b.total)} in ${primaryYear} vs ${fmt$(top.a.total)} in ${compareYear} (${fmtDelta$(top.b.total - top.a.total)}, ${fmtPct(dPct)}). Whatever you did differently here, do more of it.`});
+  }
+
+  const matchedDec = m.matched
+    .filter(x => x.b.total < x.a.total && x.a.total > 0)
+    .sort((x,y) => (x.b.total - x.a.total) - (y.b.total - y.a.total));
+  if (matchedDec.length) {
+    const top = matchedDec[0];
+    const dPct = (top.b.total - top.a.total) / top.a.total;
+    insights.push({sev:'negative', icon:'⬇️', title:`Biggest event drop: ${top.b.eventDisplay}`, text:`${fmt$(top.b.total)} in ${primaryYear} vs ${fmt$(top.a.total)} in ${compareYear} (${fmtDelta$(top.b.total - top.a.total)}, ${fmtPct(dPct)}). Worth a postmortem before next year.`});
+  }
+
+  if (m.newOnes.length) {
+    // Only flag a "best new event" if it's a bookable show-style event
+    // (Elite, Key, or Traditional). Mesa Marketplace, Service Events, Malls,
+    // RLT, and Industry events don't belong in this insight.
+    const ALLOWED_NEW = new Set(['Elite', 'Key', 'Traditional']);
+    const eligibleNew = m.newOnes.filter(o => ALLOWED_NEW.has(o.category));
+    if (eligibleNew.length) {
+      const topNew = [...eligibleNew].sort((x,y) => y.total - x.total)[0];
+      if (topNew.total >= 5000) {
+        insights.push({sev:'positive', icon:'✨', title:`Best new event: ${topNew.eventDisplay}`, text:`${fmt$(topNew.total)} CPO. Didn't appear in ${compareYear} — added to your calendar in ${primaryYear} and paid off.`});
+      }
+    }
+  }
+
+  if (m.lostOnes.length && !scope.isPartial) {
+    // Only flag missing events when comparing full years (otherwise events that haven't happened yet would falsely trigger).
+    // Restrict to bookable show categories (Elite/Key/Traditional) and require at least $10K in last year's CPO —
+    // a missed Service Event or small one-off isn't the same kind of "did I drop the ball" concern.
+    const ALLOWED_LOST = new Set(['Elite', 'Key', 'Traditional']);
+    const eligibleLost = m.lostOnes.filter(o => ALLOWED_LOST.has(o.category) && o.total >= 10000);
+    if (eligibleLost.length) {
+      const topLost = [...eligibleLost].sort((x,y) => y.total - x.total)[0];
+      insights.push({sev:'caution', icon:'❓', title:`Most-missed event: ${topLost.eventDisplay}`, text:`Did ${fmt$(topLost.total)} in ${compareYear} but didn't appear in ${primaryYear}. Was it cancelled, missed, or just not yet booked?`});
+    }
+  }
+
+  // 6. EVENT COUNT CHANGE
+  if (pctCnt != null && Math.abs(tP.count - tC.count) >= 5) {
+    const cntDiff = tP.count - tC.count;
+    if (cntDiff > 0) {
+      const productivity = tP.count > 0 ? tP.cpo / tP.count : 0;
+      const productivityB = tC.count > 0 ? tC.cpo / tC.count : 0;
+      const prodPct = productivityB ? (productivity - productivityB) / productivityB : null;
+      const prodNote = prodPct != null
+        ? (prodPct > 0.02 ? ` And CPO-per-event is up ${fmtPct(prodPct)} — you're working more events AND getting more from each.`
+          : prodPct < -0.02 ? ` But CPO-per-event is down ${fmtPct(prodPct)} — you're spreading thinner across more events.`
+          : ` CPO-per-event is roughly steady.`)
+        : '';
+      insights.push({sev:'neutral', icon:'📅', title:`Working ${cntDiff} more events`, text:`${tP.count} events in ${primaryYear} vs ${tC.count} in ${compareYear} (${fmtPct(pctCnt)}).${prodNote}`});
+    } else {
+      insights.push({sev:'caution', icon:'📅', title:`Working ${Math.abs(cntDiff)} fewer events`, text:`${tP.count} events in ${primaryYear} vs ${tC.count} in ${compareYear} (${fmtPct(pctCnt)}). Are you being more selective, or missing opportunities?`});
+    }
+  }
+
+  // 7. PACE-SPECIFIC: which categories are ahead/behind on YTD basis
+  if (scope.isPartial) {
+    const aheadCats = [], behindCats = [];
+    for (const cat of CAT_ORDER) {
+      const a = (aggP[cat]||{}).cpo || 0;
+      const b = (aggC[cat]||{}).cpo || 0;
+      if (a === 0 && b === 0) continue;
+      if (b > 1000) {
+        const pct = (a - b) / b;
+        if (pct > 0.10) aheadCats.push({cat, pct});
+        else if (pct < -0.10) behindCats.push({cat, pct});
+      }
+    }
+    if (aheadCats.length){
+      aheadCats.sort((x,y)=>y.pct-x.pct);
+      insights.push({sev:'positive', icon:'✅', title:`Ahead of ${compareYear} pace in: ${aheadCats.map(c=>c.cat).join(', ')}`, text:aheadCats.map(c=>`${c.cat} ${fmtPct(c.pct)}`).join(' • ')});
+    }
+    if (behindCats.length){
+      behindCats.sort((x,y)=>x.pct-y.pct);
+      insights.push({sev:'caution', icon:'⏳', title:`Behind ${compareYear} pace in: ${behindCats.map(c=>c.cat).join(', ')}`, text:behindCats.map(c=>`${c.cat} ${fmtPct(c.pct)}`).join(' • ')});
+    }
+  }
+
+  return insights;
+}
+
+// Renders the projection panel. Computes a year-end estimate from YTD pace using
+// prior years' seasonal shapes as the reference. Hidden if not projectable.
+function renderProjection(){
+  const panel = document.getElementById('projectionPanel');
+  const proj = computeProjection();
+  if (!proj) { panel.style.display = 'none'; panel.innerHTML = ''; return; }
+  panel.style.display = '';
+
+  const { primary, lastMonth, primYTD, perYear, projCpo, projOrders, projAvg, cpoLow, cpoHigh } = proj;
+  const lastMonthName = MONTH_NAMES[lastMonth];
+
+  // Build per-reference-year breakdown rows
+  const refRows = perYear.map(p => {
+    const vsLast = (projCpo - p.yFull.cpo) / p.yFull.cpo;
+    return `<tr>
+      <td>${p.refYear}</td>
+      <td class="r">${(p.cpoFrac*100).toFixed(1)}%</td>
+      <td class="r">${fmt$(p.projCpo)}</td>
+      <td class="r ${deltaClass(vsLast)}">${deltaArrow(vsLast)} ${fmtPct(vsLast)}</td>
+    </tr>`;
+  }).join('');
+
+  // Comparison vs each reference year (using the AVG projection)
+  const vsLines = perYear.map(p => {
+    const pct = (projCpo - p.yFull.cpo) / p.yFull.cpo;
+    return `<span class="${deltaClass(pct)}" style="margin-right:18px;">${deltaArrow(pct)} ${fmtPct(pct)} vs ${p.refYear}</span>`;
+  }).join('');
+
+  const rangeLine = perYear.length > 1
+    ? `<div class="proj-range">Range based on prior years' seasonal patterns: <strong>${fmt$(cpoLow)} – ${fmt$(cpoHigh)}</strong></div>`
+    : `<div class="proj-range">Single-year reference (${perYear[0].refYear}). Projection is more reliable with multiple full prior years to average across.</div>`;
+
+  panel.innerHTML = `
+    <div class="panel proj-panel">
+      <div class="phead">
+        <div>
+          <div class="ptit2">Year-End Projection
+            <span class="ptit2-sub">— ${primary} on pace through ${lastMonthName}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="proj-headline">
+        <div class="proj-cell">
+          <div class="proj-cell-lbl">Projected CPO</div>
+          <div class="proj-cell-val">${fmt$(projCpo)}</div>
+        </div>
+        <div class="proj-cell">
+          <div class="proj-cell-lbl">Projected Orders</div>
+          <div class="proj-cell-val">${fmtN(projOrders)}</div>
+        </div>
+        <div class="proj-cell">
+          <div class="proj-cell-lbl">Projected Avg Order</div>
+          <div class="proj-cell-val">${fmt$dec(projAvg)}</div>
+        </div>
+      </div>
+
+      <div class="proj-vs">${vsLines}</div>
+
+      ${rangeLine}
+
+      <details class="proj-method">
+        <summary>How this is calculated</summary>
+        <p>${primary} YTD CPO is ${fmt$(primYTD.cpo)} through ${lastMonthName}. To estimate year-end, we look at how each prior year's Jan–${lastMonthName} compared to its full-year total — that fraction tells us the typical seasonal shape:</p>
+        <div class="tbl-wrap"><table class="tbl proj-tbl">
+          <thead><tr>
+            <th>Reference Year</th>
+            <th class="r">% of year by ${lastMonthName}</th>
+            <th class="r">→ Projected ${primary}</th>
+            <th class="r">vs ref year actual</th>
+          </tr></thead>
+          <tbody>${refRows}</tbody>
+        </table></div>
+        <p>The headline projection above is the average across reference years. Hidden years (toggled off above) are excluded.</p>
+      </details>
+    </div>`;
+}
+
+
+function renderInsights(primaryYear, compareYear, scope){
+  const insights = generateInsights(primaryYear, compareYear, scope);
+  let html = '';
+  for (const i of insights) {
+    const sev = i.sev || 'neutral';
+    html += `<div class="insight-card" data-sev="${sev}">
+      <div class="insight-title">${i.icon ? `<span style="margin-right:4px;">${i.icon}</span>` : ''}${i.title || ''}</div>
+      ${i.text ? `<div class="insight-text">${i.text}</div>` : ''}
+    </div>`;
+  }
+  if (!insights.length) {
+    html = `<p style="color:var(--muted);font-size:13px;margin:0;">No findings to report.</p>`;
+  }
+  document.getElementById('insightsContent').innerHTML = html;
+}
+
+// Render a category-lock chip row inside the given container.
+function renderCatFilterChips(containerId, onChange){
+  const present = new Set(STATE.events.map(e => e.category));
+  const cats = ['all', ...CAT_ORDER.filter(c => present.has(c))];
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `<span style="font-size:11.5px;color:var(--muted);align-self:center;margin-right:4px;font-weight:600;">RANKING:</span>` +
+    cats.map(c => `<button class="chip ${STATE.catFilter===c?'active':''}" data-catfilter="${c}">${c==='all'?'All':c}</button>`).join('');
+  el.querySelectorAll('[data-catfilter]').forEach(b => b.addEventListener('click', () => {
+    STATE.catFilter = b.dataset.catfilter;
+    if (onChange) onChange();
+  }));
+}
+
+// Shared helper: render year-toggle chips into a container so the user can include/exclude
+// individual comparison years from a view. Used on the Overview KPI strip AND on the By Campaign page.
+// State is intentionally shared via STATE.kpiHiddenYears so hiding 2023 once hides it everywhere.
+// The primary year is never toggleable — it's the page's anchor.
+function renderYearToggleChips(containerId, onChange){
+  const el = document.getElementById(containerId);
+  if (!el) { return; }
+  const compYears = STATE.years.filter(y => y !== STATE.primaryYear);
+  if (compYears.length === 0) { el.innerHTML = ''; return; }
+  const chips = compYears.map(y => {
+    const hidden = STATE.kpiHiddenYears.has(y);
+    return `<span class="yr-chip${hidden ? ' off' : ''}" data-yr="${y}" role="button" tabindex="0" aria-pressed="${!hidden}">vs ${y}</span>`;
+  }).join('');
+  el.innerHTML = `<div class="kpi-toggle-row">
+    <span class="kpi-toggle-lbl">Compare to:</span>
+    ${chips}
+  </div>`;
+  el.querySelectorAll('.yr-chip').forEach(chip => {
+    const handler = () => {
+      const yr = Number(chip.dataset.yr);
+      if (STATE.kpiHiddenYears.has(yr)) STATE.kpiHiddenYears.delete(yr);
+      else STATE.kpiHiddenYears.add(yr);
+      saveStorage();
+      if (onChange) onChange();
+    };
+    chip.addEventListener('click', handler);
+    chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+  });
+}
+
+// Returns the list of years currently visible after applying the user's hidden-years filter.
+// The primary year is always included regardless of hidden state.
+function visibleYears(){
+  return STATE.years.filter(y => y === STATE.primaryYear || !STATE.kpiHiddenYears.has(y));
+}
+
+// ============================================
+// OVERVIEW
+// ============================================
+function renderOverview(){
+  const scope = getActiveScope();
+  const primary = STATE.primaryYear;
+
+  // Title and pace banner
+  document.getElementById('ovTitle').textContent = `${primary} year-over-year`;
+  document.getElementById('ovSub').textContent = `Comparing ${STATE.years.join(', ')} • ${scope.label}`;
+
+  const banner = document.getElementById('paceBanner');
+  if (scope.isPartial) {
+    const evs = STATE.byYear[primary] || [];
+    const am = activeMonthsForYear(evs);
+    const lastMonth = MONTH_NAMES[am[am.length-1]];
+    const others = STATE.years.filter(y => y !== primary);
+    let verdictLine = '';
+    if (STATE.paceMode && others.length){
+      // Build a quick verdict against the most recent prior year
+      const compYr = others[others.length-1];
+      const tP = totalsFor(eventsInScope(primary, scope));
+      const tC = totalsFor(eventsInScope(compYr, scope));
+      const pct = tC.cpo ? (tP.cpo - tC.cpo) / tC.cpo : null;
+      if (pct != null) {
+        if (pct >= 0.05) verdictLine = ` <strong style="color:var(--pos);">Ahead of ${compYr} by ${fmtPct(pct)}.</strong>`;
+        else if (pct <= -0.05) verdictLine = ` <strong style="color:var(--neg);">Behind ${compYr} by ${fmtPct(pct)}.</strong>`;
+        else verdictLine = ` <strong>On pace with ${compYr} (${fmtPct(pct)}).</strong>`;
+      }
+    }
+    banner.innerHTML = `<div class="pace-banner">
+      <div><strong>${primary} is partial — data through ${lastMonth} only.</strong>
+      ${STATE.paceMode
+        ? `Showing all years restricted to Jan–${lastMonth} for like-for-like pace comparison.${verdictLine}`
+        : `Toggle pace mode to compare apples to apples.`}</div>
+      <div class="toggle-row">
+        <span>Pace mode</span>
+        <span class="toggle ${STATE.paceMode?'on':''}" id="paceToggle"></span>
+      </div>
+    </div>`;
+    document.getElementById('paceToggle').addEventListener('click', () => {
+      STATE.paceMode = !STATE.paceMode;
+      renderOverview();
+    });
+  } else {
+    banner.innerHTML = '';
+  }
+
+  // KPI strip — primary year vs each other year.
+  // The user can hide individual comparison years via STATE.kpiHiddenYears (toggled by the chip row below).
+  const primEvs = eventsInScope(primary, scope);
+  const primT = totalsFor(primEvs);
+
+  // Render shared comparison-year chip row. State is shared with By Campaign page.
+  renderYearToggleChips('ovKpiToggles', renderOverview);
+
+  // KPI strip — restructured as a 3-column matrix:
+  // each column is a metric (CPO / Total Orders / Avg Order); rows within a column are years.
+  // Primary year is the headline at top of each column. Comparison years stack below
+  // with their delta vs primary. STATE.kpiHiddenYears controls which comparison rows show up.
+  // For each comparison year, the percentage delta is "primary's performance vs that year":
+  //   pct = (primary - comparison) / comparison
+  // So a green ▲ on the 2025 row means primary year is doing BETTER than 2025 on that metric.
+
+  const compRows = [];
+  for (const y of STATE.years) {
+    if (y === primary) continue;
+    if (STATE.kpiHiddenYears.has(y)) continue;
+    const t = totalsFor(eventsInScope(y, scope));
+    compRows.push({
+      year: y,
+      cpo: t.cpo, orders: t.orders, avg: t.avg, count: t.count,
+      dCpo: t.cpo ? (primT.cpo - t.cpo) / t.cpo : null,
+      dOrders: t.orders ? (primT.orders - t.orders) / t.orders : null,
+      dAvg: t.avg ? (primT.avg - t.avg) / t.avg : null,
+    });
+  }
+
+  // Helper: render one stacked column for a given metric.
+  function buildMetricColumn(label, primaryVal, primarySub, getCompVal, getCompPct){
+    const compHtml = compRows.map(r => {
+      const pct = getCompPct(r);
+      return `
+      <div class="kpi-stack-row">
+        <div class="kpi-stack-yr">${r.year}</div>
+        <div class="kpi-stack-val-sm">${getCompVal(r)}</div>
+        ${pct == null
+          ? '<div class="kpi-stack-delta">—</div>'
+          : `<div class="kpi-stack-delta ${deltaClass(pct)}">${deltaArrow(pct)} ${fmtPct(pct)}</div>`
+        }
+      </div>`;
+    }).join('');
+    return `<div class="kpi-stack">
+      <div class="kpi-stack-lbl">${label}</div>
+      <div class="kpi-stack-row primary">
+        <div class="kpi-stack-yr">${primary}<span style="color:var(--accent);font-size:9px;vertical-align:1px;margin-left:3px;">●</span></div>
+        <div class="kpi-stack-val">${primaryVal}</div>
+        ${primarySub ? `<div class="kpi-stack-sub">${primarySub}</div>` : ''}
+      </div>
+      ${compHtml}
+    </div>`;
+  }
+
+  const kpiHtml =
+    buildMetricColumn(
+      'CPO',
+      fmt$(primT.cpo),
+      `${primT.count} events`,
+      r => fmt$(r.cpo),
+      r => r.dCpo
+    ) +
+    buildMetricColumn(
+      'Total Orders',
+      fmtN(primT.orders),
+      null,
+      r => fmtN(r.orders),
+      r => r.dOrders
+    ) +
+    buildMetricColumn(
+      'Avg Order',
+      fmt$dec(primT.avg),
+      null,
+      r => r.avg ? fmt$dec(r.avg) : '—',
+      r => r.dAvg
+    );
+
+  document.getElementById('ovKpis').innerHTML = kpiHtml;
+
+  // === Projection panel ===
+  // Estimates year-end CPO/orders based on YTD pace and prior years' seasonal shapes.
+  // Hidden when primary year is full or no full prior years are available.
+  renderProjection();
+
+  // Wire chip clicks (delegated): toggle the year in/out of the hidden set, persist, re-render
+  // (Chip wiring is now handled by renderYearToggleChips above)
+
+  // === Auto Insights panel ===
+  const others = STATE.years.filter(y => y !== primary);
+  const insightsPanel = document.getElementById('insightsPanel');
+  if (others.length === 0) {
+    insightsPanel.style.display = 'none';
+  } else {
+    insightsPanel.style.display = '';
+    if (STATE.insightCompareYear == null || !others.includes(STATE.insightCompareYear)) {
+      STATE.insightCompareYear = others[others.length - 1]; // default to most recent prior
+    }
+    // Update the prominent "comparing PRIMARY against [SELECT]" header line
+    document.getElementById('insightHeadPrimary').textContent = primary;
+    const sel = document.getElementById('insightCompareYr');
+    sel.innerHTML = others.map(y => `<option value="${y}" ${y===STATE.insightCompareYear?'selected':''}>${y}</option>`).join('');
+    sel.onchange = e => {
+      STATE.insightCompareYear = Number(e.target.value);
+      renderInsights(primary, STATE.insightCompareYear, scope);
+    };
+    renderInsights(primary, STATE.insightCompareYear, scope);
+  }
+
+  // Scope labels
+  const scopeNote = scope.isPartial && STATE.paceMode ? ` (${scope.label.replace('Like-for-like: ','')})` : '';
+  ['ovScopeLbl','ovScopeLbl2','ovScopeLbl3','ovScopeLbl4'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.textContent = scopeNote;
+  });
+
+  // Build the four matrix tables
+  buildMatrixTable('ovCpoTable', scope, ev => ev.total, fmt$, true);
+  buildMatrixTable('ovOrdTable', scope, ev => ev.orders, fmtN, false);
+  buildAvgMatrixTable('ovAvgTable', scope);
+  buildCountMatrixTable('ovCntTable', scope);
+}
+
+// Render the column header for the comparison column.
+// Returns an HTML <th> with an embedded <select> so the user can switch comparison years.
+// All four matrix tables share STATE.matrixCompareYear, so changing it on any table
+// re-renders all four with the new comparison year.
+function compareHeaderCell(suffix){
+  const opts = STATE.years.filter(y => y !== STATE.primaryYear);
+  if (!opts.length) return '';
+  const sel = STATE.matrixCompareYear || opts[opts.length-1];
+  const optsHtml = opts.map(y => `<option value="${y}"${y===sel?' selected':''}>${y}</option>`).join('');
+  // The select is styled to look like a column header but is clickable/keyboard-navigable.
+  // The wrapper class .cmp-yr-pick is defined in the CSS section.
+  return `<th class="r"><span class="cmp-yr-pick"><span class="cmp-yr-pre">vs </span><select class="cmp-yr-select" onchange="window.__setMatrixCmpYr(this.value)" aria-label="Comparison year">${optsHtml}</select><span class="cmp-yr-post">${suffix}</span></span></th>`;
+}
+
+// rows: categories. cols: years. last col: pct change vs the user-selected comparison year (default = most recent non-primary).
+function buildMatrixTable(tableId, scope, valFn, fmtFn){
+  const primary = STATE.primaryYear;
+  const others = STATE.years.filter(y => y !== primary);
+  const compYr = STATE.matrixCompareYear && others.includes(STATE.matrixCompareYear)
+    ? STATE.matrixCompareYear
+    : others[others.length-1];
+  let html = `<thead><tr><th>Category</th>`;
+  for (const y of STATE.years) html += `<th class="r">${y}${y===primary?' <span style="color:var(--accent);font-size:9px;vertical-align:1px;margin-left:3px;">●</span>':''}</th>`;
+  if (others.length) html += compareHeaderCell(' %');
+  html += `</tr></thead><tbody>`;
+
+  // Per-category rows
+  const yearAgg = {};
+  for (const y of STATE.years) {
+    yearAgg[y] = aggByCategory(eventsInScope(y, scope).map(e => ({...e, total: valFn(e), orders: valFn(e)===e.orders?e.orders:e.orders})));
+  }
+  // Actually simpler: aggregate by valFn directly
+  for (const y of STATE.years) {
+    const evs = eventsInScope(y, scope);
+    const agg = {};
+    for (const cat of CAT_ORDER) agg[cat] = 0;
+    for (const e of evs) {
+      const c = e.category || 'Other';
+      agg[c] = (agg[c]||0) + valFn(e);
+    }
+    yearAgg[y] = agg;
+  }
+
+  let totals = {};
+  for (const y of STATE.years) totals[y] = 0;
+
+  for (const cat of CAT_ORDER) {
+    let hasAny = false;
+    for (const y of STATE.years) if (yearAgg[y][cat]) hasAny = true;
+    if (!hasAny) continue;
+    html += `<tr><td class="cat">${cat}</td>`;
+    for (const y of STATE.years) {
+      const v = yearAgg[y][cat] || 0;
+      totals[y] += v;
+      html += `<td class="r">${v ? fmtFn(v) : '<span style="color:var(--faded);">—</span>'}</td>`;
+    }
+    if (others.length) {
+      const a = yearAgg[primary][cat] || 0;
+      const b = yearAgg[compYr][cat] || 0;
+      const pct = b ? (a-b)/b : null;
+      html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
+    }
+    html += `</tr>`;
+  }
+  // Total row
+  html += `<tr class="total"><td>TOTAL</td>`;
+  for (const y of STATE.years) html += `<td class="r">${fmtFn(totals[y])}</td>`;
+  if (others.length) {
+    const pct = totals[compYr] ? (totals[primary]-totals[compYr])/totals[compYr] : null;
+    html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
+  }
+  html += `</tr></tbody>`;
+  document.getElementById(tableId).innerHTML = html;
+}
+
+function buildAvgMatrixTable(tableId, scope){
+  const primary = STATE.primaryYear;
+  const others = STATE.years.filter(y => y !== primary);
+  const compYr = STATE.matrixCompareYear && others.includes(STATE.matrixCompareYear)
+    ? STATE.matrixCompareYear
+    : others[others.length-1];
+  let html = `<thead><tr><th>Category</th>`;
+  for (const y of STATE.years) html += `<th class="r">${y}${y===primary?' <span style="color:var(--accent);font-size:9px;vertical-align:1px;margin-left:3px;">●</span>':''}</th>`;
+  if (others.length) html += compareHeaderCell(' %');
+  html += `</tr></thead><tbody>`;
+
+  const yearAgg = {};
+  for (const y of STATE.years) yearAgg[y] = aggByCategory(eventsInScope(y, scope));
+
+  for (const cat of CAT_ORDER) {
+    let hasAny = false;
+    for (const y of STATE.years) if (yearAgg[y][cat] && yearAgg[y][cat].orders) hasAny = true;
+    if (!hasAny) continue;
+    html += `<tr><td class="cat">${cat}</td>`;
+    for (const y of STATE.years) {
+      const a = yearAgg[y][cat];
+      const v = (a && a.orders) ? a.cpo / a.orders : 0;
+      html += `<td class="r">${v ? fmt$dec(v) : '<span style="color:var(--faded);">—</span>'}</td>`;
+    }
+    if (others.length) {
+      const aP = yearAgg[primary][cat], aC = yearAgg[compYr][cat];
+      const vP = (aP && aP.orders) ? aP.cpo/aP.orders : 0;
+      const vC = (aC && aC.orders) ? aC.cpo/aC.orders : 0;
+      const pct = vC ? (vP-vC)/vC : null;
+      html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
+    }
+    html += `</tr>`;
+  }
+  // Grand avg
+  html += `<tr class="total"><td>TOTAL AVG</td>`;
+  for (const y of STATE.years) {
+    const t = totalsFor(eventsInScope(y, scope));
+    html += `<td class="r">${t.avg ? fmt$dec(t.avg) : '—'}</td>`;
+  }
+  if (others.length) {
+    const tP = totalsFor(eventsInScope(primary, scope));
+    const tC = totalsFor(eventsInScope(compYr, scope));
+    const pct = tC.avg ? (tP.avg-tC.avg)/tC.avg : null;
+    html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
+  }
+  html += `</tr></tbody>`;
+  document.getElementById(tableId).innerHTML = html;
+}
+
+function buildCountMatrixTable(tableId, scope){
+  const primary = STATE.primaryYear;
+  const others = STATE.years.filter(y => y !== primary);
+  const compYr = STATE.matrixCompareYear && others.includes(STATE.matrixCompareYear)
+    ? STATE.matrixCompareYear
+    : others[others.length-1];
+  let html = `<thead><tr><th>Category</th>`;
+  for (const y of STATE.years) html += `<th class="r">${y}${y===primary?' <span style="color:var(--accent);font-size:9px;vertical-align:1px;margin-left:3px;">●</span>':''}</th>`;
+  if (others.length) html += compareHeaderCell('');
+  html += `</tr></thead><tbody>`;
+
+  const yearAgg = {};
+  for (const y of STATE.years) yearAgg[y] = aggByCategory(eventsInScope(y, scope));
+
+  let totals = {}; for (const y of STATE.years) totals[y] = 0;
+  for (const cat of CAT_ORDER) {
+    let hasAny = false;
+    for (const y of STATE.years) if (yearAgg[y][cat] && yearAgg[y][cat].count) hasAny = true;
+    if (!hasAny) continue;
+    html += `<tr><td class="cat">${cat}</td>`;
+    for (const y of STATE.years) {
+      const v = (yearAgg[y][cat]||{}).count || 0;
+      totals[y] += v;
+      html += `<td class="r">${v || '<span style="color:var(--faded);">—</span>'}</td>`;
+    }
+    if (others.length) {
+      const a = (yearAgg[primary][cat]||{}).count || 0;
+      const b = (yearAgg[compYr][cat]||{}).count || 0;
+      const d = a - b;
+      html += `<td class="r ${deltaClass(d)}">${d>=0?'+':''}${d}</td>`;
+    }
+    html += `</tr>`;
+  }
+  html += `<tr class="total"><td>TOTAL</td>`;
+  for (const y of STATE.years) html += `<td class="r">${totals[y]}</td>`;
+  if (others.length) {
+    const d = totals[primary] - totals[compYr];
+    html += `<td class="r ${deltaClass(d)}">${d>=0?'+':''}${d}</td>`;
+  }
+  html += `</tr></tbody>`;
+  document.getElementById(tableId).innerHTML = html;
+}
+
+// ============================================
+// BY MONTH
+// ============================================
+function renderMonth(){
+  // Category-lock chips at the top
+  renderCatFilterChips('monthCatChips', renderMonth);
+
+  // Year-toggle chips — shared with home page and By Campaign
+  renderYearToggleChips('monthYearToggles', renderMonth);
+
+  // Month chips
+  const chips = document.getElementById('monthChips');
+  chips.innerHTML = MONTH_NAMES.map((m,i) =>
+    `<button class="chip ${STATE.currentMonth===i?'active':''}" data-mon="${i}">${m}</button>`
+  ).join('');
+  chips.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+    STATE.currentMonth = Number(c.dataset.mon);
+    renderMonth();
+  }));
+
+  // Detail panel for selected month
+  if (STATE.currentMonth == null) {
+    document.getElementById('monthDetail').innerHTML = `
+      <div class="panel"><p style="color:var(--muted);font-size:13px;margin:0;">Pick a month above to see a category breakdown across all stored years.</p></div>`;
+  } else {
+    document.getElementById('monthDetail').innerHTML = renderMonthDetail(STATE.currentMonth);
+  }
+
+  // 12-month × all-years grid (CPO and Orders) — respects category lock
+  buildMonthGrid('monthGrid', e => e.total, fmt$);
+  buildMonthGrid('monthGridOrd', e => e.orders, fmtN);
+
+  // Update grid panel titles to reflect filter
+  const catLbl = STATE.catFilter === 'all' ? '' : ` — ${STATE.catFilter} only`;
+  const grid1 = document.querySelector('#monthGrid');
+  const grid2 = document.querySelector('#monthGridOrd');
+  if (grid1) {
+    const ph = grid1.closest('.panel').querySelector('.ptit2');
+    if (ph) ph.textContent = `All months × All years (CPO)${catLbl}`;
+  }
+  if (grid2) {
+    const ph = grid2.closest('.panel').querySelector('.ptit2');
+    if (ph) ph.textContent = `All months × All years (Total Orders)${catLbl}`;
+  }
+}
+
+function renderMonthDetail(monthIdx){
+  // Honor the user's hidden-years toggle. Primary year always included.
+  const yrs = visibleYears();
+  const primary = STATE.primaryYear;
+  const others = yrs.filter(y => y !== primary);
+  const filtered = STATE.catFilter !== 'all';
+  const catLbl = filtered ? ` — <span style="color:var(--accent);font-style:italic;">${STATE.catFilter}</span> only` : '';
+
+  let html = `<div class="panel">
+    <div class="phead"><div class="ptit2">${MONTH_LONG[monthIdx]} — all years${catLbl}</div></div>
+    <div class="kpi-row">`;
+
+  for (const y of yrs) {
+    const evsRaw = (STATE.byYear[y] || []).filter(e => e.month === monthIdx);
+    const evs = filterByCat(evsRaw);
+    const t = totalsFor(evs);
+    const isP = y === primary;
+    html += `<div class="kpi" ${isP?'style="background:var(--surface-alt);"':''}>
+      <div class="kpi-lbl">${y}${isP?' (primary)':''}</div>
+      <div class="kpi-val">${fmt$(t.cpo)}</div>
+      <div class="kpi-sub">${t.count} events • ${fmtN(t.orders)} orders</div>
+      ${t.avg ? `<div class="kpi-sub">Avg: ${fmt$dec(t.avg)}</div>` : ''}
+    </div>`;
+  }
+  html += `</div>`;
+
+  // Category breakdown table — only when "all" categories shown (otherwise it's a 1-row table)
+  if (!filtered) {
+    html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th>`;
+    for (const y of yrs) html += `<th class="r">${y} CPO</th>`;
+    if (others.length) html += `<th class="r">vs ${others[others.length-1]} %</th>`;
+    html += `</tr></thead><tbody>`;
+    const yearAgg = {};
+    for (const y of yrs) yearAgg[y] = aggMonthByCategory(STATE.byYear[y]||[], monthIdx);
+    let totals = {}; for (const y of yrs) totals[y] = 0;
+    for (const cat of CAT_ORDER) {
+      let hasAny = false;
+      for (const y of yrs) if (yearAgg[y][cat] && yearAgg[y][cat].cpo) hasAny = true;
+      if (!hasAny) continue;
+      html += `<tr><td class="cat">${cat}</td>`;
+      for (const y of yrs) {
+        const v = (yearAgg[y][cat]||{}).cpo || 0;
+        totals[y] += v;
+        html += `<td class="r">${v ? fmt$(v) : '<span style="color:var(--faded);">—</span>'}</td>`;
+      }
+      if (others.length) {
+        const compYr = others[others.length-1];
+        const a = (yearAgg[primary][cat]||{}).cpo || 0;
+        const b = (yearAgg[compYr][cat]||{}).cpo || 0;
+        const pct = b ? (a-b)/b : null;
+        html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
+      }
+      html += `</tr>`;
+    }
+    html += `<tr class="total"><td>TOTAL</td>`;
+    for (const y of yrs) html += `<td class="r">${fmt$(totals[y])}</td>`;
+    if (others.length) {
+      const compYr = others[others.length-1];
+      const pct = totals[compYr] ? (totals[primary]-totals[compYr])/totals[compYr] : null;
+      html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
+    }
+    html += `</tr></tbody></table></div>`;
+  } else {
+    // Show year-over-year delta line for the locked category
+    if (others.length) {
+      const compYr = others[others.length-1];
+      const evsP = filterByCat((STATE.byYear[primary]||[]).filter(e => e.month === monthIdx));
+      const evsC = filterByCat((STATE.byYear[compYr]||[]).filter(e => e.month === monthIdx));
+      const tP = totalsFor(evsP), tC = totalsFor(evsC);
+      const pctCpo = tC.cpo ? (tP.cpo - tC.cpo)/tC.cpo : null;
+      const pctOrd = tC.orders ? (tP.orders - tC.orders)/tC.orders : null;
+      const pctAvg = tC.avg ? (tP.avg - tC.avg)/tC.avg : null;
+      html += `<p style="font-size:12.5px;margin:6px 0 0;color:var(--muted);">
+        ${primary} ${STATE.catFilter} in ${MONTH_LONG[monthIdx]} vs ${compYr}:
+        <span class="${deltaClass(pctCpo||0)}">${pctCpo==null?'—':fmtPct(pctCpo)} CPO</span> •
+        <span class="${deltaClass(pctOrd||0)}">${pctOrd==null?'—':fmtPct(pctOrd)} orders</span> •
+        <span class="${deltaClass(pctAvg||0)}">${pctAvg==null?'—':fmtPct(pctAvg)} avg order</span>
+      </p>`;
+    }
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function buildMonthGrid(tableId, valFn, fmtFn){
+  // Honor the user's hidden-years toggle for the 12-month × all-years grid.
+  const yrs = visibleYears();
+  const primary = STATE.primaryYear;
+  let html = `<thead><tr><th>Month</th>`;
+  for (const y of yrs) html += `<th class="r">${y}${y===primary?'<span style="color:var(--accent);font-size:9px;vertical-align:1px;margin-left:3px;">●</span>':''}</th>`;
+  html += `</tr></thead><tbody>`;
+  let totals = {}; for (const y of yrs) totals[y] = 0;
+  for (let m = 0; m < 12; m++) {
+    html += `<tr><td class="cat">${MONTH_LONG[m]}</td>`;
+    for (const y of yrs) {
+      const evsRaw = (STATE.byYear[y]||[]).filter(e => e.month === m);
+      const evs = filterByCat(evsRaw);
+      const v = evs.reduce((s,e) => s+valFn(e), 0);
+      totals[y] += v;
+      html += `<td class="r">${v ? fmtFn(v) : '<span style="color:var(--faded);">—</span>'}</td>`;
+    }
+    html += `</tr>`;
+  }
+  html += `<tr class="total"><td>TOTAL</td>`;
+  for (const y of yrs) html += `<td class="r">${fmtFn(totals[y])}</td>`;
+  html += `</tr></tbody>`;
+  document.getElementById(tableId).innerHTML = html;
+}
+
+// ============================================
+// BY CAMPAIGN
+// ============================================
+function renderCampaign(){
+  // Category-lock chips at the top
+  renderCatFilterChips('campCatChips', renderCampaign);
+
+  // Year-toggle chips — shared with the home page
+  renderYearToggleChips('campYearToggles', renderCampaign);
+
+  const chips = document.getElementById('campChips');
+  chips.innerHTML = CAMPAIGNS.map(c =>
+    `<button class="chip ${STATE.currentCampaign===c.id?'active':''}" data-camp="${c.id}">${c.name} <span style="opacity:.7;font-weight:400;">(${c.span})</span></button>`
+  ).join('');
+  chips.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+    STATE.currentCampaign = Number(c.dataset.camp);
+    renderCampaign();
+  }));
+
+  document.getElementById('campDetail').innerHTML = renderCampaignDetail(STATE.currentCampaign);
+  buildCampaignGrid('campGrid', e => e.total, fmt$);
+  buildCampaignGrid('campGridOrd', e => e.orders, fmtN);
+
+  // Update grid panel titles to reflect filter
+  const catLbl = STATE.catFilter === 'all' ? '' : ` — ${STATE.catFilter} only`;
+  const grid1 = document.querySelector('#campGrid');
+  const grid2 = document.querySelector('#campGridOrd');
+  if (grid1) {
+    const ph = grid1.closest('.panel').querySelector('.ptit2');
+    if (ph) ph.textContent = `All campaigns × All years (CPO)${catLbl}`;
+  }
+  if (grid2) {
+    const ph = grid2.closest('.panel').querySelector('.ptit2');
+    if (ph) ph.textContent = `All campaigns × All years (Total Orders)${catLbl}`;
+  }
+}
+
+function renderCampaignDetail(campId){
+  const camp = CAMPAIGNS.find(c => c.id === campId);
+  if (!camp) return '';
+  // Honor the user's hidden-years toggle — only iterate the years they want to see.
+  // Primary year is always included regardless of hidden state.
+  const yrs = visibleYears();
+  const primary = STATE.primaryYear;
+  const others = yrs.filter(y => y !== primary);
+  const monthSet = new Set(camp.months);
+  const filtered = STATE.catFilter !== 'all';
+  const catLbl = filtered ? ` — <span style="color:var(--accent);font-style:italic;">${STATE.catFilter}</span> only` : '';
+
+  let html = `<div class="panel">
+    <div class="phead"><div class="ptit2">${camp.name} — ${camp.span}${catLbl}</div></div>`;
+
+  // Detect partial campaign for primary year (use unfiltered events for month detection — partial-ness is about calendar coverage)
+  const primEvsRaw = (STATE.byYear[primary]||[]).filter(e => monthSet.has(e.month));
+  const primMonthsActive = [...new Set(primEvsRaw.map(e => e.month))].sort();
+  const isPartialCampaign = primMonthsActive.length > 0 && primMonthsActive.length < camp.months.length;
+
+  if (isPartialCampaign) {
+    html += `<p style="font-size:12.5px;color:var(--warn);margin:0 0 14px;">
+      <strong>${primary} ${camp.name} is in progress</strong> — through ${MONTH_NAMES[primMonthsActive[primMonthsActive.length-1]]}.
+      The breakdown below restricts other years to those same months for a fair pace comparison. The grid at the bottom shows full campaigns.
+    </p>`;
+  }
+
+  const compareMonths = isPartialCampaign ? new Set(primMonthsActive) : monthSet;
+
+  html += `<div class="kpi-row">`;
+  for (const y of yrs) {
+    const evsRaw = (STATE.byYear[y]||[]).filter(e => compareMonths.has(e.month));
+    const evs = filterByCat(evsRaw);
+    const t = totalsFor(evs);
+    const isP = y === primary;
+    html += `<div class="kpi" ${isP?'style="background:var(--surface-alt);"':''}>
+      <div class="kpi-lbl">${y}${isP?' (primary)':''}</div>
+      <div class="kpi-val">${fmt$(t.cpo)}</div>
+      <div class="kpi-sub">${t.count} events • ${fmtN(t.orders)} orders</div>
+      ${t.avg ? `<div class="kpi-sub">Avg: ${fmt$dec(t.avg)}</div>` : ''}
+    </div>`;
+  }
+  html += `</div>`;
+
+  // Pace verdict (vs most recent prior year), respecting category lock
+  if (isPartialCampaign && others.length) {
+    const compYr = others[others.length-1];
+    const evsP = filterByCat(primEvsRaw);
+    const evsC = filterByCat((STATE.byYear[compYr]||[]).filter(e => compareMonths.has(e.month)));
+    const tP = totalsFor(evsP), tC = totalsFor(evsC);
+    const pct = tC.cpo ? (tP.cpo - tC.cpo)/tC.cpo : null;
+    const lbl = filtered ? `${STATE.catFilter}` : 'Total';
+    let verdict = '';
+    if (pct == null) verdict = 'Not enough comparable data.';
+    else if (pct >= 0.05) verdict = `<strong style="color:var(--pos);">${lbl} ahead of pace</strong> vs ${compYr} by ${fmtPct(pct)}.`;
+    else if (pct <= -0.05) verdict = `<strong style="color:var(--neg);">${lbl} behind pace</strong> vs ${compYr} by ${fmtPct(pct)}.`;
+    else verdict = `<strong>${lbl} on pace</strong> with ${compYr} (${fmtPct(pct)}).`;
+    html += `<p style="font-size:13px;margin:0 0 14px;color:var(--ink);">📊 ${verdict}</p>`;
+  }
+
+  // Category breakdown table — only when filter is "all"
+  if (!filtered) {
+    html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th>`;
+    for (const y of yrs) html += `<th class="r">${y} CPO</th>`;
+    if (others.length) html += `<th class="r">vs ${others[others.length-1]} %</th>`;
+    html += `</tr></thead><tbody>`;
+    const yearAgg = {};
+    for (const y of yrs) {
+      const evs = (STATE.byYear[y]||[]).filter(e => compareMonths.has(e.month));
+      yearAgg[y] = aggByCategory(evs);
+    }
+    let totals = {}; for (const y of yrs) totals[y] = 0;
+    for (const cat of CAT_ORDER) {
+      let hasAny = false;
+      for (const y of yrs) if (yearAgg[y][cat] && yearAgg[y][cat].cpo) hasAny = true;
+      if (!hasAny) continue;
+      html += `<tr><td class="cat">${cat}</td>`;
+      for (const y of yrs) {
+        const v = (yearAgg[y][cat]||{}).cpo || 0;
+        totals[y] += v;
+        html += `<td class="r">${v ? fmt$(v) : '<span style="color:var(--faded);">—</span>'}</td>`;
+      }
+      if (others.length) {
+        const compYr = others[others.length-1];
+        const a = (yearAgg[primary][cat]||{}).cpo || 0;
+        const b = (yearAgg[compYr][cat]||{}).cpo || 0;
+        const pct = b ? (a-b)/b : null;
+        html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
+      }
+      html += `</tr>`;
+    }
+    html += `<tr class="total"><td>TOTAL</td>`;
+    for (const y of yrs) html += `<td class="r">${fmt$(totals[y])}</td>`;
+    if (others.length) {
+      const compYr = others[others.length-1];
+      const pct = totals[compYr] ? (totals[primary]-totals[compYr])/totals[compYr] : null;
+      html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
+    }
+    html += `</tr></tbody></table></div>`;
+  } else if (others.length) {
+    // Show YoY delta for the locked category in this campaign window
+    const compYr = others[others.length-1];
+    const evsP = filterByCat(primEvsRaw);
+    const evsC = filterByCat((STATE.byYear[compYr]||[]).filter(e => compareMonths.has(e.month)));
+    const tP = totalsFor(evsP), tC = totalsFor(evsC);
+    const pctOrd = tC.orders ? (tP.orders - tC.orders)/tC.orders : null;
+    const pctAvg = tC.avg ? (tP.avg - tC.avg)/tC.avg : null;
+    const pctCnt = tC.count ? (tP.count - tC.count)/tC.count : null;
+    html += `<p style="font-size:12.5px;margin:6px 0 0;color:var(--muted);">
+      ${primary} ${STATE.catFilter} in ${camp.name} vs ${compYr}:
+      <span class="${deltaClass(pctOrd||0)}">${pctOrd==null?'—':fmtPct(pctOrd)} orders</span> •
+      <span class="${deltaClass(pctAvg||0)}">${pctAvg==null?'—':fmtPct(pctAvg)} avg order</span> •
+      <span class="${deltaClass(pctCnt||0)}">${pctCnt==null?'—':fmtPct(pctCnt)} # events</span>
+    </p>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function buildCampaignGrid(tableId, valFn, fmtFn){
+  // Honor the user's hidden-years toggle for the All-campaigns × All-years grid too.
+  const yrs = visibleYears();
+  const primary = STATE.primaryYear;
+  let html = `<thead><tr><th>Campaign</th>`;
+  for (const y of yrs) html += `<th class="r">${y}${y===primary?'<span style="color:var(--accent);font-size:9px;vertical-align:1px;margin-left:3px;">●</span>':''}</th>`;
+  html += `</tr></thead><tbody>`;
+  let totals = {}; for (const y of yrs) totals[y] = 0;
+  for (const camp of CAMPAIGNS) {
+    const monthSet = new Set(camp.months);
+    html += `<tr><td class="cat">${camp.name} <span style="font-weight:400;color:var(--faded);font-size:11px;">${camp.span}</span></td>`;
+    for (const y of yrs) {
+      const evsRaw = (STATE.byYear[y]||[]).filter(e => monthSet.has(e.month));
+      const evs = filterByCat(evsRaw);
+      const v = evs.reduce((s,e)=>s+valFn(e), 0);
+      totals[y] += v;
+      html += `<td class="r">${v ? fmtFn(v) : '<span style="color:var(--faded);">—</span>'}</td>`;
+    }
+    html += `</tr>`;
+  }
+  html += `<tr class="total"><td>TOTAL</td>`;
+  for (const y of yrs) html += `<td class="r">${fmtFn(totals[y])}</td>`;
+  html += `</tr></tbody>`;
+  document.getElementById(tableId).innerHTML = html;
+}
+
+// ============================================
+// BY EVENT
+// ============================================
+function renderEvent(){
+  const yrs = STATE.years;
+  const yA = document.getElementById('evYearA');
+  const yB = document.getElementById('evYearB');
+  yA.innerHTML = yrs.map(y => `<option value="${y}" ${y===STATE.evYearA?'selected':''}>${y}</option>`).join('');
+  yB.innerHTML = yrs.map(y => `<option value="${y}" ${y===STATE.evYearB?'selected':''}>${y}</option>`).join('');
+
+  const evsA = STATE.byYear[STATE.evYearA] || [];
+  const evsB = STATE.byYear[STATE.evYearB] || [];
+  const m = matchEventsByName(evsA, evsB);
+
+  // The "New this year" tab is filtered to bookable show categories only — Service Events,
+  // Mesa Marketplace, Mall days, RLT, and Industry events don't belong in a "what genuinely new
+  // shows did I add" view. Same filter we apply to the "Best new event" Auto Insight.
+  const ALLOWED_NEW = new Set(['Elite', 'Key', 'Traditional']);
+  const eligibleNew = m.newOnes.filter(o => ALLOWED_NEW.has(o.category));
+
+  document.getElementById('evMatchSummary').textContent =
+    `${m.matched.length} matched • ${eligibleNew.length} new (Elite/Key/Traditional) in ${STATE.evYearB} • ${m.lostOnes.length} didn't return`;
+
+  // Build category chips dynamically
+  const cats = new Set(['all']);
+  for (const ev of evsA) cats.add(ev.category);
+  for (const ev of evsB) cats.add(ev.category);
+  const chipBox = document.getElementById('evCatChips');
+  chipBox.innerHTML = ['all', ...CAT_ORDER.filter(c => cats.has(c))].map(c =>
+    `<button class="chip ${STATE.evCatFilter===c?'active':''}" data-cat="${c}">${c==='all'?'All categories':c}</button>`
+  ).join('');
+  chipBox.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
+    STATE.evCatFilter = b.dataset.cat;
+    renderEvent();
+  }));
+
+  // Sub-tab data
+  const tab = STATE.evSubTab;
+  let rows = [];
+  if (tab === 'matched' || tab === 'grew' || tab === 'declined') {
+    rows = m.matched.map(({a,b}) => ({
+      name: b.eventDisplay || a.eventDisplay,
+      cat: b.category || a.category,
+      month: b.month,
+      monthA: a.month, // for showing month shift if it changed
+      vA: a.total, vB: b.total,
+      oA: a.orders, oB: b.orders,
+      diff: b.total - a.total,
+      pct: a.total ? (b.total - a.total)/a.total : null,
+    }));
+    if (tab === 'grew') rows = rows.filter(r => r.diff > 0);
+    if (tab === 'declined') rows = rows.filter(r => r.diff < 0);
+  } else if (tab === 'new') {
+    // Use the pre-filtered eligibleNew (Elite/Key/Traditional only)
+    rows = eligibleNew.map(o => ({
+      name: o.eventDisplay, cat: o.category, month: o.month,
+      vA: 0, vB: o.total, oA: 0, oB: o.orders, diff: o.total, pct: null
+    }));
+  } else if (tab === 'lost') {
+    rows = m.lostOnes.map(o => ({
+      name: o.eventDisplay, cat: o.category, month: o.month,
+      vA: o.total, vB: 0, oA: o.orders, oB: 0, diff: -o.total, pct: -1
+    }));
+  }
+
+  // Category filter
+  if (STATE.evCatFilter !== 'all') rows = rows.filter(r => r.cat === STATE.evCatFilter);
+  // Search
+  if (STATE.evSearch) {
+    const q = STATE.evSearch.toLowerCase();
+    rows = rows.filter(r => r.name.toLowerCase().includes(q));
+  }
+  // Sort
+  if (STATE.evSort === 'diff_desc') rows.sort((x,y) => Math.abs(y.diff) - Math.abs(x.diff));
+  else if (STATE.evSort === 'diff_pct') rows.sort((x,y) => Math.abs(y.pct||0) - Math.abs(x.pct||0));
+  else if (STATE.evSort === 'cpo_desc') rows.sort((x,y) => y.vB - x.vB);
+  else if (STATE.evSort === 'name') rows.sort((x,y) => x.name.localeCompare(y.name));
+
+  if (tab === 'grew') rows.sort((x,y) => y.diff - x.diff);
+  if (tab === 'declined') rows.sort((x,y) => x.diff - y.diff);
+
+  // Build table
+  let html = `<thead><tr>
+    <th>Event</th><th>Cat</th><th>Mo</th>
+    <th class="r">${STATE.evYearA} CPO</th>
+    <th class="r">${STATE.evYearB} CPO</th>
+    <th class="r">Δ CPO</th><th class="r">Δ %</th>
+    <th class="r">${STATE.evYearA} Ord</th>
+    <th class="r">${STATE.evYearB} Ord</th>
+  </tr></thead><tbody>`;
+  if (rows.length === 0) {
+    html += `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);">No events match these filters.</td></tr>`;
+  }
+  for (const r of rows) {
+    const dCls = deltaClass(r.diff);
+    html += `<tr>
+      <td>${escapeHtml(r.name)}</td>
+      <td><span class="badge bb">${escapeHtml(r.cat)}</span></td>
+      <td style="color:var(--muted);">${
+        r.monthA != null && r.monthA !== r.month
+          ? `<span style="color:var(--accent);" title="Event moved months between years">${MONTH_NAMES[r.monthA]}→${MONTH_NAMES[r.month]}</span>`
+          : MONTH_NAMES[r.month]
+      }</td>
+      <td class="r">${r.vA ? fmt$(r.vA) : '<span style="color:var(--faded);">—</span>'}</td>
+      <td class="r">${r.vB ? fmt$(r.vB) : '<span style="color:var(--faded);">—</span>'}</td>
+      <td class="r ${dCls}">${deltaArrow(r.diff)} ${fmtDelta$(r.diff)}</td>
+      <td class="r ${dCls}">${r.pct==null?'—':fmtPct(r.pct)}</td>
+      <td class="r">${r.oA ? fmtN(r.oA) : '<span style="color:var(--faded);">—</span>'}</td>
+      <td class="r">${r.oB ? fmtN(r.oB) : '<span style="color:var(--faded);">—</span>'}</td>
+    </tr>`;
+  }
+  html += `</tbody>`;
+  document.getElementById('evTable').innerHTML = html;
+}
+
+// ============================================
+// SETTINGS
+// ============================================
+
+// Build a stable identity key for an event so we can target it for edits.
+// Combines event raw name + start date + total + orders, normalized.
+function eventKey(ev){
+  return (ev.eventRaw || '').replace(/\s+/g,'').toLowerCase() + '|' +
+         ev.startDate + '|' + (ev.total||0).toFixed(0) + '|' + (ev.orders||0).toFixed(0);
+}
+
+function renderRerankPanel(){
+  const listEl = document.getElementById('rerankList');
+  const yrSel = document.getElementById('rerankYearFilter');
+  const cntEl = document.getElementById('editCount');
+  if (!listEl) return;
+
+  // Year filter dropdown
+  const yrs = STATE.years;
+  yrSel.innerHTML = `<option value="all" ${STATE.rerankYearFilter==='all'?'selected':''}>All years</option>` +
+    yrs.map(y => `<option value="${y}" ${String(STATE.rerankYearFilter)===String(y)?'selected':''}>${y}</option>`).join('');
+
+  // Counts for header
+  const unknownCount = STATE.events.filter(e => e.category === 'Unknown').length;
+  const autoCount = STATE.events.filter(e => e.autoAssigned).length;
+  const editCount = STATE.editedEventKeys.size;
+  const parts = [];
+  if (unknownCount > 0) parts.push(`${unknownCount} unknown`);
+  if (autoCount > 0) parts.push(`${autoCount} auto-assigned`);
+  if (editCount > 0) parts.push(`${editCount} hand-edited`);
+  cntEl.textContent = parts.join(' · ');
+
+  // Quick filter chips
+  if (!STATE.rerankQuickFilter) STATE.rerankQuickFilter = 'all';
+  const quickEl = document.getElementById('rerankQuickFilter');
+  if (quickEl) {
+    quickEl.innerHTML =
+      `<button class="chip ${STATE.rerankQuickFilter==='all'?'active':''}" data-quick="all">All events</button>` +
+      (unknownCount > 0 ? `<button class="chip ${STATE.rerankQuickFilter==='unknown'?'active':''}" data-quick="unknown">Unknown only (${unknownCount})</button>` : '') +
+      (autoCount > 0 ? `<button class="chip ${STATE.rerankQuickFilter==='auto'?'active':''}" data-quick="auto">Auto-assigned (${autoCount})</button>` : '');
+    quickEl.querySelectorAll('[data-quick]').forEach(b => b.addEventListener('click', () => {
+      STATE.rerankQuickFilter = b.dataset.quick;
+      renderRerankPanel();
+    }));
+  }
+
+  // Filter events
+  const q = (STATE.rerankSearch || '').trim().toLowerCase();
+  let pool = STATE.events.slice();
+  if (STATE.rerankYearFilter !== 'all') {
+    pool = pool.filter(e => e.year === Number(STATE.rerankYearFilter));
+  }
+  if (STATE.rerankQuickFilter === 'unknown') {
+    pool = pool.filter(e => e.category === 'Unknown');
+  } else if (STATE.rerankQuickFilter === 'auto') {
+    pool = pool.filter(e => e.autoAssigned);
+  }
+  if (q) {
+    pool = pool.filter(e => (e.eventDisplay || '').toLowerCase().includes(q));
+  }
+
+  if (!q && STATE.rerankYearFilter === 'all' && STATE.rerankQuickFilter === 'all') {
+    listEl.innerHTML = `<p style="color:var(--muted);font-size:12.5px;margin:0;">Type an event name above, pick a year, or use a quick filter to find events to re-rank.</p>`;
+    return;
+  }
+
+  // Sort: unknowns first, then most recent
+  pool.sort((a,b) => {
+    if ((a.category === 'Unknown') !== (b.category === 'Unknown')) {
+      return a.category === 'Unknown' ? -1 : 1;
+    }
+    if (a.year !== b.year) return b.year - a.year;
+    return b.month - a.month;
+  });
+  const capped = pool.slice(0, 100);
+
+  if (capped.length === 0) {
+    listEl.innerHTML = `<p style="color:var(--muted);font-size:12.5px;margin:0;">No events match your filters.</p>`;
+    return;
+  }
+
+  let html = `<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Event</th><th>Year</th><th>Month</th><th class="r">CPO</th><th>Ranking</th></tr></thead><tbody>`;
+  for (const ev of capped) {
+    const key = eventKey(ev);
+    const edited = STATE.editedEventKeys.has(key);
+    const opts = CAT_ORDER.map(c => `<option value="${c}" ${ev.category===c?'selected':''}>${c}</option>`).join('');
+    let badges = '';
+    if (ev.category === 'Unknown') badges += ` <span class="badge br" style="margin-left:6px;">unknown</span>`;
+    else if (ev.autoAssigned) badges += ` <span class="badge bb" style="margin-left:6px;">auto · ${ev.autoAssigned}</span>`;
+    if (edited) badges += ` <span class="badge by" style="margin-left:6px;">edited</span>`;
+    html += `<tr>
+      <td>${escapeHtml(ev.eventDisplay)}${badges}</td>
+      <td>${ev.year}</td>
+      <td style="color:var(--muted);">${MONTH_NAMES[ev.month]}</td>
+      <td class="r">${fmt$(ev.total)}</td>
+      <td><select class="rerank-select" data-evkey="${escapeHtml(key)}" style="font-size:12.5px;padding:5px 8px;border:1px solid var(--hairline);border-radius:4px;background:var(--surface);font-family:var(--sans);">${opts}</select></td>
+    </tr>`;
+  }
+  html += `</tbody></table></div>`;
+  if (pool.length > 100) {
+    html += `<p style="color:var(--muted);font-size:11.5px;margin-top:10px;">Showing first 100 of ${pool.length} matches. Refine your search to see more.</p>`;
+  }
+  listEl.innerHTML = html;
+
+  // Wire change handlers
+  listEl.querySelectorAll('.rerank-select').forEach(sel => {
+    sel.addEventListener('change', e => {
+      const targetKey = e.target.dataset.evkey;
+      const newCat = e.target.value;
+      const ev = STATE.events.find(x => eventKey(x) === targetKey);
+      if (!ev) { showToast('Event not found — try refreshing.', 'error'); return; }
+      const oldCat = ev.category;
+      ev.category = newCat;
+      ev.autoAssigned = null; // user has now confirmed/changed it
+      STATE.editedEventKeys.add(targetKey);
+      saveStorage();
+      rebuildDerived();
+      showToast(`${ev.eventDisplay} — ${oldCat} → ${newCat}`, 'success');
+      renderRerankPanel();
+    });
+  });
+}
+
+function renderSettings(){
+  // Stored years panel
+  const yrs = STATE.years;
+  let html = '';
+  if (yrs.length === 0) {
+    html = `<p style="color:var(--muted);font-size:13px;margin:0;">No data stored yet. Upload a workbook to begin.</p>`;
+  } else {
+    html += `<div class="tbl-wrap"><table class="tbl"><thead><tr>
+      <th>Year</th><th class="r"># Events</th><th class="r">Total CPO</th><th class="r">Total Orders</th><th>Months covered</th><th></th>
+    </tr></thead><tbody>`;
+    for (const y of yrs) {
+      const evs = STATE.byYear[y];
+      const t = totalsFor(evs);
+      const am = activeMonthsForYear(evs);
+      const monthsLbl = am.length === 12 ? 'Full year (Jan–Dec)' :
+                        am.length === 0 ? '—' :
+                        am.map(i => MONTH_NAMES[i]).join(', ');
+      html += `<tr>
+        <td class="cat">${y}${y===STATE.primaryYear?' <span class="badge bb">primary</span>':''}</td>
+        <td class="r">${t.count}</td>
+        <td class="r">${fmt$(t.cpo)}</td>
+        <td class="r">${fmtN(t.orders)}</td>
+        <td style="font-size:11.5px;color:var(--muted);">${monthsLbl}</td>
+        <td class="r"><button class="btn btn-dn" data-removeyr="${y}">Remove</button></td>
+      </tr>`;
+    }
+    html += `</tbody></table></div>`;
+  }
+  document.getElementById('storedYears').innerHTML = html;
+  document.querySelectorAll('[data-removeyr]').forEach(b => b.addEventListener('click', () => {
+    const y = Number(b.dataset.removeyr);
+    if (!confirm(`Remove all ${y} data from this dashboard? You can re-upload it later.`)) return;
+    removeYear(y);
+    showToast(`Removed ${y}.`, 'success');
+    updateNavChrome();
+    refreshAll();
+  }));
+
+  // Find & re-rank events panel
+  renderRerankPanel();
+
+  // Last upload sheet report
+  const reportEl = document.getElementById('lastUploadReport');
+  if (STATE.lastSheetReport && STATE.lastSheetReport.length){
+    let rh = `<p style="font-size:12.5px;color:var(--muted);margin-bottom:12px;">Tabs in your most recent upload and how each was handled. Skipped tabs are summary/derived views the dashboard avoids reading.</p>
+      <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Sheet</th><th>Status</th><th class="r">Rows read</th><th>Notes</th></tr></thead><tbody>`;
+    for (const r of STATE.lastSheetReport){
+      let badge = '';
+      if (r.status === 'ok') badge = `<span class="badge bg">read</span>`;
+      else if (r.status === 'skipped') badge = `<span class="badge by">skipped</span>`;
+      else if (r.status === 'empty') badge = `<span class="badge bn">empty</span>`;
+      else if (r.status === 'no-match') badge = `<span class="badge br">no match</span>`;
+      else badge = `<span class="badge">${escapeHtml(r.status)}</span>`;
+      rh += `<tr>
+        <td>${escapeHtml(r.sheet)}</td>
+        <td>${badge}</td>
+        <td class="r">${r.count || 0}</td>
+        <td style="font-size:11.5px;color:var(--muted);">${escapeHtml(r.reason || '')}</td>
+      </tr>`;
+    }
+    rh += `</tbody></table></div>`;
+    reportEl.innerHTML = rh;
+  } else {
+    reportEl.innerHTML = `<p style="color:var(--muted);font-size:12.5px;">No upload in this session yet. The most recent upload's processing report will appear here after you add data.</p>`;
+  }
+}
+
+// ============================================
+// CSV EXPORT
+// ============================================
+function exportOverviewCsv(){
+  const scope = getActiveScope();
+  const lines = [];
+  const yrs = STATE.years;
+  lines.push(['Category', ...yrs.map(y => `${y} CPO`), ...yrs.map(y => `${y} Orders`), ...yrs.map(y => `${y} #Events`)].join(','));
+  for (const cat of CAT_ORDER) {
+    const row = [cat];
+    const cpoVals = []; const ordVals = []; const cntVals = [];
+    for (const y of yrs) {
+      const a = aggByCategory(eventsInScope(y, scope))[cat] || {cpo:0,orders:0,count:0};
+      cpoVals.push(a.cpo);
+      ordVals.push(a.orders);
+      cntVals.push(a.count);
+    }
+    if (cpoVals.every(v => !v) && cntVals.every(v => !v)) continue;
+    row.push(...cpoVals, ...ordVals, ...cntVals);
+    lines.push(row.join(','));
+  }
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `event_overview_${yrs.join('_vs_')}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ============================================
+// WIRING
+// ============================================
+function init(){
+  // Expose the matrix-compare-year setter on window so the inline <select onchange="..."> in
+  // table headers can call it. When the user picks a different year on ANY of the four
+  // matrix tables, we update STATE and re-render the whole Overview so all four stay in sync.
+  window.__setMatrixCmpYr = function(yr){
+    STATE.matrixCompareYear = Number(yr);
+    renderOverview();
+  };
+
+  // Tab clicks
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => setActivePage(t.dataset.page));
+  });
+
+  // File inputs
+  document.getElementById('fileInput').addEventListener('change', e => handleFile(e.target.files[0]));
+  document.getElementById('fileInput2').addEventListener('change', e => handleFile(e.target.files[0]));
+
+  // Year selector
+  document.getElementById('yrPrimary').addEventListener('change', e => {
+    STATE.primaryYear = Number(e.target.value);
+    refreshAll();
+  });
+
+  // Event page controls
+  document.getElementById('evYearA').addEventListener('change', e => {
+    STATE.evYearA = Number(e.target.value); renderEvent();
+  });
+  document.getElementById('evYearB').addEventListener('change', e => {
+    STATE.evYearB = Number(e.target.value); renderEvent();
+  });
+  document.querySelectorAll('#evSubtabs .subtab').forEach(s => {
+    s.addEventListener('click', () => {
+      STATE.evSubTab = s.dataset.tab;
+      document.querySelectorAll('#evSubtabs .subtab').forEach(x => x.classList.toggle('active', x === s));
+      renderEvent();
+    });
+  });
+  document.getElementById('evSearch').addEventListener('input', e => {
+    STATE.evSearch = e.target.value; renderEvent();
+  });
+  document.getElementById('evSort').addEventListener('change', e => {
+    STATE.evSort = e.target.value; renderEvent();
+  });
+
+  // Overview download
+  document.getElementById('dlOverview').addEventListener('click', exportOverviewCsv);
+
+  // Re-rank search & year filter (Settings page)
+  const rerankSearchEl = document.getElementById('rerankSearch');
+  if (rerankSearchEl) {
+    rerankSearchEl.addEventListener('input', e => {
+      STATE.rerankSearch = e.target.value;
+      renderRerankPanel();
+    });
+  }
+  const rerankYearEl = document.getElementById('rerankYearFilter');
+  if (rerankYearEl) {
+    rerankYearEl.addEventListener('change', e => {
+      STATE.rerankYearFilter = e.target.value;
+      renderRerankPanel();
+    });
+  }
+
+  // Clear all
+  document.getElementById('clearAllBtn').addEventListener('click', () => {
+    if (!confirm('Clear ALL stored years from this dashboard? This cannot be undone (but you can re-upload).')) return;
+    clearStorage();
+    showToast('Cleared all data.', 'success');
+    updateNavChrome();
+    setActivePage('overview'); // will fall back to empty since no data
+  });
+
+  // Load from storage
+  const loaded = loadStorage();
+  updateNavChrome();
+  if (loaded) {
+    setActivePage('overview');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+</body>
+</html>
