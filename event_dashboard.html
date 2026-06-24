@@ -1090,6 +1090,19 @@ nav.topnav{
   </div>
 
   <div class="panel">
+    <div class="phead"><div class="ptit2">Publish for reps <span class="ptit2-sub">push your current data to the live site</span></div>
+      <button class="btn" id="publishDataBtn">⬇ Download data.json</button>
+    </div>
+    <p style="font-size:12.5px;color:var(--muted);line-height:1.6;">
+      Reps see whatever data is published to the live site — they can view it but can't change it. To update what reps see:
+      <strong style="color:var(--ink);">(1)</strong> upload your latest spreadsheet here so the dashboard shows the numbers you want,
+      <strong style="color:var(--ink);">(2)</strong> click <em>Download data.json</em>,
+      <strong style="color:var(--ink);">(3)</strong> put that <code>data.json</code> into your <code>event-analyzer</code> repo (replacing the old one) and push.
+      Within a minute, every rep who opens the site sees the new data automatically.
+    </p>
+  </div>
+
+  <div class="panel">
     <div class="phead">
       <div><div class="ptit2">Find &amp; re-rank events <span class="ptit2-sub">edit category for any individual event</span></div></div>
       <span id="editCount" style="font-size:11px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em;"></span>
@@ -1692,6 +1705,57 @@ function loadStorage(){
     return false;
   }
 }
+// Build the same payload saveStorage() writes — this is the exact shape loadStorage()
+// and loadPublishedData() know how to restore.
+function buildPayload(){
+  return {
+    events: STATE.events,
+    editedEventKeys: [...STATE.editedEventKeys],
+    kpiHiddenYears: [...STATE.kpiHiddenYears],
+    lastUpdated: new Date().toISOString()
+  };
+}
+
+// Owner action: download the current data as data.json to commit to the repo.
+// Reps never see this button do anything — it only produces a file the owner publishes.
+function publishData(){
+  if (!STATE.events.length){
+    showToast('Nothing to publish yet — upload your spreadsheet first.', 'error');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(buildPayload())], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'data.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showToast('data.json downloaded — commit it to your event-analyzer repo to update reps.', 'success');
+}
+
+// On startup, fetch the data.json published with the site so reps (who have no local
+// upload) see the owner's numbers. Published data wins only when it is newer than what
+// is already in this browser, so the owner's unpublished local work is never clobbered.
+async function loadPublishedData(hadLocal){
+  try {
+    const localRaw = localStorage.getItem(STORAGE_KEY);
+    const localUpdated = localRaw ? (JSON.parse(localRaw).lastUpdated || '') : '';
+    const resp = await fetch('./data.json', {cache:'no-store'});
+    if (!resp.ok) return;                                   // no published file — fine
+    const obj = await resp.json();
+    if (!obj || !Array.isArray(obj.events) || !obj.events.length) return;
+    // Keep local data if it is at least as new as the published file.
+    if (hadLocal && localUpdated && (obj.lastUpdated || '') <= localUpdated) return;
+    STATE.events = obj.events;
+    STATE.editedEventKeys = new Set(obj.editedEventKeys || []);
+    STATE.kpiHiddenYears = new Set((obj.kpiHiddenYears || []).map(Number));
+    rebuildDerived();
+    updateNavChrome();
+    setActivePage('overview');
+  } catch (e) {
+    console.warn('No published data loaded:', e);
+  }
+}
+
 function clearStorage(){
   localStorage.removeItem(STORAGE_KEY);
   STATE.events = [];
@@ -3432,12 +3496,18 @@ function init(){
     setActivePage('overview'); // will fall back to empty since no data
   });
 
-  // Load from storage
+  // Publish for reps (owner downloads data.json to commit to the repo)
+  const pubBtn = document.getElementById('publishDataBtn');
+  if (pubBtn) pubBtn.addEventListener('click', publishData);
+
+  // Load from this browser first (owner's personal / in-progress data)…
   const loaded = loadStorage();
   updateNavChrome();
   if (loaded) {
     setActivePage('overview');
   }
+  // …then load the data.json published with the site so reps see the owner's numbers.
+  loadPublishedData(loaded);
 }
 
 document.addEventListener('DOMContentLoaded', init);
