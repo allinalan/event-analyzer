@@ -28,8 +28,10 @@
   /* Signal — used only for data semantics, never decoration */
   --pos:#15803D;
   --pos-bg:#F0FAF1;
+  --pos-tint:#D8F0DF;
   --neg:#991B1B;
   --neg-bg:#FDF4F4;
+  --neg-tint:#FADBDB;
   --warn:#92400E;
   --warn-bg:#FEFAF1;
   --info:#1E40AF;
@@ -359,13 +361,24 @@ nav.topnav{
 .kpi-stack-delta.delta-up{ color:var(--pos); }
 .kpi-stack-delta.delta-dn{ color:var(--neg); }
 .kpi-stack-delta.delta-flat{ color:var(--muted); }
+/* The absolute delta is shown as a colored pill so growth/decline is unmissable. */
+.kpi-stack-delta-main{
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:999px;
+  font-weight:700;
+  font-size:11px;
+}
+.kpi-stack-delta.delta-up .kpi-stack-delta-main{ background:var(--pos-tint); }
+.kpi-stack-delta.delta-dn .kpi-stack-delta-main{ background:var(--neg-tint); }
+.kpi-stack-delta.delta-flat .kpi-stack-delta-main{ background:var(--surface-alt); color:var(--muted); }
 .kpi-stack-delta-pct{
   display:block;
   font-size:9px;
-  font-weight:400;
+  font-weight:500;
   letter-spacing:.03em;
-  opacity:.72;
-  margin-top:1px;
+  opacity:.8;
+  margin-top:3px;
 }
 
 /* Year-end projection panel — shows estimated full-year totals based on YTD pace.
@@ -551,6 +564,16 @@ nav.topnav{
 .delta-up{color:var(--pos);}
 .delta-dn{color:var(--neg);}
 .delta-flat{color:var(--muted);}
+
+/* Make growth/decline pop in dense tables: tint the delta cells so the eye catches
+   direction at a glance without reading every figure. Scoped to table cells, so inline
+   delta text (insights, summary lines) keeps its plain colored style. The ▲/▼ arrows
+   stay too, so direction is clear without relying on color (colorblind-safe). */
+.tbl td.r.delta-up{ background:var(--pos-tint); color:var(--pos); font-weight:600; }
+.tbl td.r.delta-dn{ background:var(--neg-tint); color:var(--neg); font-weight:600; }
+.tbl td.r.delta-flat{ color:var(--faded); }
+.tbl tr.total td.r.delta-up{ background:var(--pos-tint); color:var(--pos); }
+.tbl tr.total td.r.delta-dn{ background:var(--neg-tint); color:var(--neg); }
 
 /* ===== Panels ===== */
 .panel{
@@ -2612,7 +2635,7 @@ function renderOverview(){
         const mainStr = abs != null ? fmtAbs(abs) : fmtPct(pct);
         const pctSub = (abs != null && pct != null)
           ? `<span class="kpi-stack-delta-pct">${fmtPct(pct)}</span>` : '';
-        deltaCell = `<div class="kpi-stack-delta ${deltaClass(ref)}">${deltaArrow(ref)} ${mainStr}${pctSub}</div>`;
+        deltaCell = `<div class="kpi-stack-delta ${deltaClass(ref)}"><span class="kpi-stack-delta-main">${deltaArrow(ref)} ${mainStr}</span>${pctSub}</div>`;
       }
       return `
       <div class="kpi-stack-row">
