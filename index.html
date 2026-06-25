@@ -1735,6 +1735,13 @@ function fmt$dec(v){ if(!isFinite(v)) return '$0.00'; return '$' + v.toLocaleStr
 function fmtPct(v){ if(!isFinite(v)) return '—'; const sign = v >= 0 ? '+' : ''; return sign + (v*100).toFixed(1) + '%'; }
 function fmtDelta$(v){ if(!isFinite(v)) return '—'; const sign = v>=0 ? '+' : '-'; return sign + '$' + Math.abs(Math.round(v)).toLocaleString('en-US'); }
 function fmtDeltaN(v){ if(!isFinite(v)) return '—'; const sign = v>=0 ? '+' : '-'; return sign + Math.abs(Math.round(v)).toLocaleString('en-US'); }
+function fmtDeltaDec$(v){ if(!isFinite(v)) return '—'; const sign = v>=0 ? '+' : '-'; return sign + '$' + Math.abs(v).toFixed(2); }
+// A right-aligned table cell showing an absolute difference (colored arrow + signed number).
+// `blank` renders a muted dash when both compared values are zero/absent.
+function absDeltaCell(diff, fmtAbs, blank){
+  if (blank) return `<td class="r"><span style="color:var(--faded);">—</span></td>`;
+  return `<td class="r ${deltaClass(diff)}">${deltaArrow(diff)} ${fmtAbs(diff)}</td>`;
+}
 function deltaClass(v){ if(v>0) return 'delta-up'; if(v<0) return 'delta-dn'; return 'delta-flat'; }
 function deltaArrow(v){ if(v>0) return '▲'; if(v<0) return '▼'; return '•'; }
 function pctChange(now, then){ if(!then) return null; return (now-then)/then; }
@@ -2692,8 +2699,8 @@ function renderOverview(){
   });
 
   // Build the four matrix tables
-  buildMatrixTable('ovCpoTable', scope, ev => ev.total, fmt$, true);
-  buildMatrixTable('ovOrdTable', scope, ev => ev.orders, fmtN, false);
+  buildMatrixTable('ovCpoTable', scope, ev => ev.total, fmt$, fmtDelta$);
+  buildMatrixTable('ovOrdTable', scope, ev => ev.orders, fmtN, fmtDeltaN);
   buildAvgMatrixTable('ovAvgTable', scope);
   buildCountMatrixTable('ovCntTable', scope);
 }
@@ -2713,7 +2720,7 @@ function compareHeaderCell(suffix){
 }
 
 // rows: categories. cols: years. last col: pct change vs the user-selected comparison year (default = most recent non-primary).
-function buildMatrixTable(tableId, scope, valFn, fmtFn){
+function buildMatrixTable(tableId, scope, valFn, fmtFn, deltaFmtFn){
   const primary = STATE.primaryYear;
   const others = STATE.years.filter(y => y !== primary);
   const compYr = STATE.matrixCompareYear && others.includes(STATE.matrixCompareYear)
@@ -2721,7 +2728,7 @@ function buildMatrixTable(tableId, scope, valFn, fmtFn){
     : others[others.length-1];
   let html = `<thead><tr><th>Category</th>`;
   for (const y of STATE.years) html += `<th class="r">${y}${y===primary?' <span style="color:var(--accent);font-size:9px;vertical-align:1px;margin-left:3px;">●</span>':''}</th>`;
-  if (others.length) html += compareHeaderCell(' %');
+  if (others.length) html += `<th class="r">Δ vs ${compYr}</th>` + compareHeaderCell(' %');
   html += `</tr></thead><tbody>`;
 
   // Per-category rows
@@ -2758,6 +2765,7 @@ function buildMatrixTable(tableId, scope, valFn, fmtFn){
       const a = yearAgg[primary][cat] || 0;
       const b = yearAgg[compYr][cat] || 0;
       const pct = b ? (a-b)/b : null;
+      html += absDeltaCell(a-b, deltaFmtFn, a===0 && b===0);
       html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
     }
     html += `</tr>`;
@@ -2766,7 +2774,9 @@ function buildMatrixTable(tableId, scope, valFn, fmtFn){
   html += `<tr class="total"><td>TOTAL</td>`;
   for (const y of STATE.years) html += `<td class="r">${fmtFn(totals[y])}</td>`;
   if (others.length) {
-    const pct = totals[compYr] ? (totals[primary]-totals[compYr])/totals[compYr] : null;
+    const adiff = totals[primary]-totals[compYr];
+    const pct = totals[compYr] ? adiff/totals[compYr] : null;
+    html += absDeltaCell(adiff, deltaFmtFn, false);
     html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
   }
   html += `</tr></tbody>`;
@@ -2781,7 +2791,7 @@ function buildAvgMatrixTable(tableId, scope){
     : others[others.length-1];
   let html = `<thead><tr><th>Category</th>`;
   for (const y of STATE.years) html += `<th class="r">${y}${y===primary?' <span style="color:var(--accent);font-size:9px;vertical-align:1px;margin-left:3px;">●</span>':''}</th>`;
-  if (others.length) html += compareHeaderCell(' %');
+  if (others.length) html += `<th class="r">Δ vs ${compYr}</th>` + compareHeaderCell(' %');
   html += `</tr></thead><tbody>`;
 
   const yearAgg = {};
@@ -2802,6 +2812,7 @@ function buildAvgMatrixTable(tableId, scope){
       const vP = (aP && aP.orders) ? aP.cpo/aP.orders : 0;
       const vC = (aC && aC.orders) ? aC.cpo/aC.orders : 0;
       const pct = vC ? (vP-vC)/vC : null;
+      html += absDeltaCell(vP-vC, fmtDeltaDec$, !vP && !vC);
       html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
     }
     html += `</tr>`;
@@ -2815,7 +2826,9 @@ function buildAvgMatrixTable(tableId, scope){
   if (others.length) {
     const tP = totalsFor(eventsInScope(primary, scope));
     const tC = totalsFor(eventsInScope(compYr, scope));
-    const pct = tC.avg ? (tP.avg-tC.avg)/tC.avg : null;
+    const adiff = tP.avg - tC.avg;
+    const pct = tC.avg ? adiff/tC.avg : null;
+    html += absDeltaCell(adiff, fmtDeltaDec$, false);
     html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
   }
   html += `</tr></tbody>`;
@@ -2923,25 +2936,31 @@ function renderMonthDetail(monthIdx){
     <div class="phead"><div class="ptit2">${MONTH_LONG[monthIdx]} — all years${catLbl}</div></div>
     <div class="kpi-row">`;
 
+  // Primary-year totals for this month — used to show each other year's order gap vs primary.
+  const primMT = totalsFor(filterByCat((STATE.byYear[primary] || []).filter(e => e.month === monthIdx)));
+
   for (const y of yrs) {
     const evsRaw = (STATE.byYear[y] || []).filter(e => e.month === monthIdx);
     const evs = filterByCat(evsRaw);
     const t = totalsFor(evs);
     const isP = y === primary;
+    const oDiff = t.orders - primMT.orders;
     html += `<div class="kpi" ${isP?'style="background:var(--surface-alt);"':''}>
       <div class="kpi-lbl">${y}${isP?' (primary)':''}</div>
       <div class="kpi-val">${fmt$(t.cpo)}</div>
       <div class="kpi-sub">${t.count} events • ${fmtN(t.orders)} orders</div>
       ${t.avg ? `<div class="kpi-sub">Avg: ${fmt$dec(t.avg)}</div>` : ''}
+      ${!isP ? `<div class="kpi-sub ${deltaClass(oDiff)}" style="font-weight:600;margin-top:3px;">${deltaArrow(oDiff)} ${fmtDeltaN(oDiff)} orders vs ${primary}</div>` : ''}
     </div>`;
   }
   html += `</div>`;
 
   // Category breakdown table — only when "all" categories shown (otherwise it's a 1-row table)
   if (!filtered) {
+    const mCompYr = others[others.length-1];
     html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th>`;
     for (const y of yrs) html += `<th class="r">${y} CPO</th>`;
-    if (others.length) html += `<th class="r">vs ${others[others.length-1]} %</th>`;
+    if (others.length) html += `<th class="r">Δ vs ${mCompYr}</th><th class="r">vs ${mCompYr} %</th>`;
     html += `</tr></thead><tbody>`;
     const yearAgg = {};
     for (const y of yrs) yearAgg[y] = aggMonthByCategory(STATE.byYear[y]||[], monthIdx);
@@ -2957,10 +2976,10 @@ function renderMonthDetail(monthIdx){
         html += `<td class="r">${v ? fmt$(v) : '<span style="color:var(--faded);">—</span>'}</td>`;
       }
       if (others.length) {
-        const compYr = others[others.length-1];
         const a = (yearAgg[primary][cat]||{}).cpo || 0;
-        const b = (yearAgg[compYr][cat]||{}).cpo || 0;
+        const b = (yearAgg[mCompYr][cat]||{}).cpo || 0;
         const pct = b ? (a-b)/b : null;
+        html += absDeltaCell(a-b, fmtDelta$, a===0 && b===0);
         html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
       }
       html += `</tr>`;
@@ -2968,8 +2987,9 @@ function renderMonthDetail(monthIdx){
     html += `<tr class="total"><td>TOTAL</td>`;
     for (const y of yrs) html += `<td class="r">${fmt$(totals[y])}</td>`;
     if (others.length) {
-      const compYr = others[others.length-1];
-      const pct = totals[compYr] ? (totals[primary]-totals[compYr])/totals[compYr] : null;
+      const adiff = totals[primary]-totals[mCompYr];
+      const pct = totals[mCompYr] ? adiff/totals[mCompYr] : null;
+      html += absDeltaCell(adiff, fmtDelta$, false);
       html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
     }
     html += `</tr></tbody></table></div>`;
@@ -2985,9 +3005,9 @@ function renderMonthDetail(monthIdx){
       const pctAvg = tC.avg ? (tP.avg - tC.avg)/tC.avg : null;
       html += `<p style="font-size:12.5px;margin:6px 0 0;color:var(--muted);">
         ${primary} ${STATE.catFilter} in ${MONTH_LONG[monthIdx]} vs ${compYr}:
-        <span class="${deltaClass(pctCpo||0)}">${pctCpo==null?'—':fmtPct(pctCpo)} CPO</span> •
-        <span class="${deltaClass(pctOrd||0)}">${pctOrd==null?'—':fmtPct(pctOrd)} orders</span> •
-        <span class="${deltaClass(pctAvg||0)}">${pctAvg==null?'—':fmtPct(pctAvg)} avg order</span>
+        <span class="${deltaClass(tP.cpo-tC.cpo)}">${deltaArrow(tP.cpo-tC.cpo)} ${fmtDelta$(tP.cpo-tC.cpo)} CPO${pctCpo==null?'':` (${fmtPct(pctCpo)})`}</span> •
+        <span class="${deltaClass(tP.orders-tC.orders)}">${deltaArrow(tP.orders-tC.orders)} ${fmtDeltaN(tP.orders-tC.orders)} orders${pctOrd==null?'':` (${fmtPct(pctOrd)})`}</span> •
+        <span class="${deltaClass(tP.avg-tC.avg)}">${deltaArrow(tP.avg-tC.avg)} ${fmtDelta$(tP.avg-tC.avg)} avg${pctAvg==null?'':` (${fmtPct(pctAvg)})`}</span>
       </p>`;
     }
   }
@@ -3087,17 +3107,22 @@ function renderCampaignDetail(campId){
 
   const compareMonths = isPartialCampaign ? new Set(primMonthsActive) : monthSet;
 
+  // Primary-year totals for this campaign window — used to show each other year's order gap.
+  const primCT = totalsFor(filterByCat((STATE.byYear[primary]||[]).filter(e => compareMonths.has(e.month))));
+
   html += `<div class="kpi-row">`;
   for (const y of yrs) {
     const evsRaw = (STATE.byYear[y]||[]).filter(e => compareMonths.has(e.month));
     const evs = filterByCat(evsRaw);
     const t = totalsFor(evs);
     const isP = y === primary;
+    const oDiff = t.orders - primCT.orders;
     html += `<div class="kpi" ${isP?'style="background:var(--surface-alt);"':''}>
       <div class="kpi-lbl">${y}${isP?' (primary)':''}</div>
       <div class="kpi-val">${fmt$(t.cpo)}</div>
       <div class="kpi-sub">${t.count} events • ${fmtN(t.orders)} orders</div>
       ${t.avg ? `<div class="kpi-sub">Avg: ${fmt$dec(t.avg)}</div>` : ''}
+      ${!isP ? `<div class="kpi-sub ${deltaClass(oDiff)}" style="font-weight:600;margin-top:3px;">${deltaArrow(oDiff)} ${fmtDeltaN(oDiff)} orders vs ${primary}</div>` : ''}
     </div>`;
   }
   html += `</div>`;
@@ -3120,9 +3145,10 @@ function renderCampaignDetail(campId){
 
   // Category breakdown table — only when filter is "all"
   if (!filtered) {
+    const cCompYr = others[others.length-1];
     html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th>`;
     for (const y of yrs) html += `<th class="r">${y} CPO</th>`;
-    if (others.length) html += `<th class="r">vs ${others[others.length-1]} %</th>`;
+    if (others.length) html += `<th class="r">Δ vs ${cCompYr}</th><th class="r">vs ${cCompYr} %</th>`;
     html += `</tr></thead><tbody>`;
     const yearAgg = {};
     for (const y of yrs) {
@@ -3141,10 +3167,10 @@ function renderCampaignDetail(campId){
         html += `<td class="r">${v ? fmt$(v) : '<span style="color:var(--faded);">—</span>'}</td>`;
       }
       if (others.length) {
-        const compYr = others[others.length-1];
         const a = (yearAgg[primary][cat]||{}).cpo || 0;
-        const b = (yearAgg[compYr][cat]||{}).cpo || 0;
+        const b = (yearAgg[cCompYr][cat]||{}).cpo || 0;
         const pct = b ? (a-b)/b : null;
+        html += absDeltaCell(a-b, fmtDelta$, a===0 && b===0);
         html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
       }
       html += `</tr>`;
@@ -3152,8 +3178,9 @@ function renderCampaignDetail(campId){
     html += `<tr class="total"><td>TOTAL</td>`;
     for (const y of yrs) html += `<td class="r">${fmt$(totals[y])}</td>`;
     if (others.length) {
-      const compYr = others[others.length-1];
-      const pct = totals[compYr] ? (totals[primary]-totals[compYr])/totals[compYr] : null;
+      const adiff = totals[primary]-totals[cCompYr];
+      const pct = totals[cCompYr] ? adiff/totals[cCompYr] : null;
+      html += absDeltaCell(adiff, fmtDelta$, false);
       html += `<td class="r ${deltaClass(pct||0)}">${pct==null?'—':fmtPct(pct)}</td>`;
     }
     html += `</tr></tbody></table></div>`;
@@ -3168,9 +3195,9 @@ function renderCampaignDetail(campId){
     const pctCnt = tC.count ? (tP.count - tC.count)/tC.count : null;
     html += `<p style="font-size:12.5px;margin:6px 0 0;color:var(--muted);">
       ${primary} ${STATE.catFilter} in ${camp.name} vs ${compYr}:
-      <span class="${deltaClass(pctOrd||0)}">${pctOrd==null?'—':fmtPct(pctOrd)} orders</span> •
-      <span class="${deltaClass(pctAvg||0)}">${pctAvg==null?'—':fmtPct(pctAvg)} avg order</span> •
-      <span class="${deltaClass(pctCnt||0)}">${pctCnt==null?'—':fmtPct(pctCnt)} # events</span>
+      <span class="${deltaClass(tP.orders-tC.orders)}">${deltaArrow(tP.orders-tC.orders)} ${fmtDeltaN(tP.orders-tC.orders)} orders${pctOrd==null?'':` (${fmtPct(pctOrd)})`}</span> •
+      <span class="${deltaClass(tP.avg-tC.avg)}">${deltaArrow(tP.avg-tC.avg)} ${fmtDelta$(tP.avg-tC.avg)} avg${pctAvg==null?'':` (${fmtPct(pctAvg)})`}</span> •
+      <span class="${deltaClass(tP.count-tC.count)}">${deltaArrow(tP.count-tC.count)} ${fmtDeltaN(tP.count-tC.count)} events${pctCnt==null?'':` (${fmtPct(pctCnt)})`}</span>
     </p>`;
   }
   html += `</div>`;
@@ -3292,9 +3319,10 @@ function renderEvent(){
     <th class="r">Δ CPO</th><th class="r">Δ %</th>
     <th class="r">${STATE.evYearA} Ord</th>
     <th class="r">${STATE.evYearB} Ord</th>
+    <th class="r">Δ Ord</th>
   </tr></thead><tbody>`;
   if (rows.length === 0) {
-    html += `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);">No events match these filters.</td></tr>`;
+    html += `<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted);">No events match these filters.</td></tr>`;
   }
   for (const r of rows) {
     const dCls = deltaClass(r.diff);
@@ -3312,6 +3340,7 @@ function renderEvent(){
       <td class="r ${dCls}">${r.pct==null?'—':fmtPct(r.pct)}</td>
       <td class="r">${r.oA ? fmtN(r.oA) : '<span style="color:var(--faded);">—</span>'}</td>
       <td class="r">${r.oB ? fmtN(r.oB) : '<span style="color:var(--faded);">—</span>'}</td>
+      ${absDeltaCell(r.oB - r.oA, fmtDeltaN, (r.oA||0)===0 && (r.oB||0)===0)}
     </tr>`;
   }
   html += `</tbody>`;
