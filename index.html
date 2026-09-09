@@ -1055,6 +1055,36 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   .panel, .kpi-tile, .fc-panel{break-inside:avoid;box-shadow:none;border:1px solid #ccc;}
   .tbl th{position:static;}
 }
+
+/* ---- Layers page ---- */
+.wf{display:flex;gap:10px;align-items:flex-end;padding:6px 0 4px;}
+.wf-col{flex:1;min-width:0;text-align:center;}
+.wf-track{position:relative;background:var(--surface-2);border-radius:6px;}
+.wf-bar{position:absolute;left:14%;right:14%;border-radius:4px;}
+.wf-abs{background:var(--ink);}
+.wf-up{background:var(--pos-bar);}
+.wf-dn{background:var(--neg-bar);}
+.wf-val{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--ink);margin-bottom:6px;white-space:nowrap;}
+.wf-val.delta-up{color:var(--pos);} .wf-val.delta-dn{color:var(--neg);}
+.wf-lbl{font-size:11px;color:var(--mut);margin-top:8px;line-height:1.3;}
+.ly-grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:18px;}
+.ly-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:16px;}
+.ly-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;}
+.ly-list-t{font-family:var(--mono);font-size:9.5px;font-weight:500;color:var(--mut);text-transform:uppercase;letter-spacing:.15em;margin-bottom:8px;}
+.ly-list ul{list-style:none;margin:0;padding:0;}
+.ly-list li{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0;border-bottom:1px solid var(--line);}
+.ly-list li:last-child{border-bottom:none;}
+.ly-list li .r{white-space:nowrap;font-weight:600;font-family:var(--mono);font-size:11.5px;}
+.ly-list li .delta-up{color:var(--pos);} .ly-list li .delta-dn{color:var(--neg);}
+.ly-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ly-note,.ly-empty{font-size:12px;color:var(--mut);margin:12px 0 0;line-height:1.5;}
+.ly-head-line{font-size:13.5px;color:var(--ink-2);margin:0 0 14px;line-height:1.55;}
+.mix{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--surface-3);min-width:120px;}
+.mix-seg{display:block;height:100%;}
+.mix-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--mut);margin-bottom:12px;}
+.mix-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;}
+.conc-bar{height:8px;background:var(--surface-3);border-radius:4px;overflow:hidden;min-width:90px;}
+.conc-bar i{display:block;height:100%;background:var(--ember);}
 </style>
 </head>
 <body>
@@ -1073,6 +1103,7 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
       <button class="tab" data-page="month">By Month</button>
       <button class="tab" data-page="campaign">By Campaign</button>
       <button class="tab" data-page="event">By Event</button>
+      <button class="tab" data-page="layers">Layers</button>
       <span class="tab-divide" aria-hidden="true"></span>
       <button class="tab tab-admin" data-page="settings">Data &amp; Settings</button>
     </div>
@@ -1251,6 +1282,33 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   <div style="height:12px;"></div>
   <div class="panel" style="padding-top:6px;">
     <div class="tbl-wrap"><table class="tbl tbl-pin" id="evTable"></table></div>
+  </div>
+  <div class="panel" id="evDnrPanel" style="display:none;"></div>
+</div>
+
+<!-- Layers -->
+<div id="layersPage" class="page">
+  <header class="page-head">
+    <div class="eyebrow">Layers</div>
+    <h1 class="ptitle" id="lyTitle">Layers</h1>
+    <p class="psub" id="lySub">The four layers underneath the season total: what moved it, how hard each shift worked, where the dollars came from, and how much rides on the biggest events.</p>
+  </header>
+  <div id="lyScopeBar"></div>
+  <div class="panel">
+    <div class="phead"><div><span class="ptit2-eyebrow">Year-over-year bridge</span><div class="ptit2">What moved the total <span class="ptit2-sub" id="bridgeSub"></span></div></div></div>
+    <div id="bridgeBody"></div>
+  </div>
+  <div class="panel">
+    <div class="phead"><div><span class="ptit2-eyebrow">Productivity per shift</span><div class="ptit2">CPO per shift worked <span class="ptit2-sub">— one shift = one rep on one selling day, from the Show Shift Schedule</span></div></div></div>
+    <div id="shiftBody"></div>
+  </div>
+  <div class="panel">
+    <div class="phead"><div><span class="ptit2-eyebrow">Where the money comes from</span><div class="ptit2">At the booth vs after the booth <span class="ptit2-sub">— service calls, free looks and other orders tied to each event</span></div></div></div>
+    <div id="moneyBody"></div>
+  </div>
+  <div class="panel">
+    <div class="phead"><div><span class="ptit2-eyebrow">Concentration</span><div class="ptit2">How much rides on the biggest events <span class="ptit2-sub">— same scope as Auto Insights: Industry, Realtor and team meetings excluded</span></div></div></div>
+    <div id="concBody"></div>
   </div>
 </div>
 
@@ -1707,8 +1765,8 @@ function parseWorkbook(wb, dictionary){
         eventNorm,
         startDate: startDate.toISOString(),
         endDate: endDate ? endDate.toISOString() : null,
-        year: startDate.getFullYear(),
-        month: startDate.getMonth(),
+        year: startDate.getUTCFullYear(),
+        month: startDate.getUTCMonth(),
         rankRaw: rank == null ? '' : String(rank),
         category,
         autoAssigned: autoMethod, // null | 'exact' | 'base-name' | 'fuzzy' | 'name-heuristic'
@@ -1969,7 +2027,13 @@ function removeYear(year){
 }
 
 function rebuildDerived(){
-  STATE.byYear = bucketByYear(STATE.events);
+  // Dates are stored as UTC midnight; year/month must be read in UTC or every
+  // first-of-month event lands in the previous month (and Jan 1 in the previous year).
+  normalizeDates(STATE.events);
+  // Events with no sales and no orders never ran (placeholders, cancelled shows).
+  // They stay in the vault and on the By Event / Rerank lists but are excluded from
+  // every total, count and average.
+  STATE.byYear = bucketByYear(STATE.events.filter(e => !didNotRun(e)));
   STATE.years = Object.keys(STATE.byYear).map(Number).sort((a,b)=>a-b);
   if (STATE.primaryYear == null || !STATE.byYear[STATE.primaryYear]) {
     STATE.primaryYear = STATE.years[STATE.years.length - 1] || null;
@@ -2646,7 +2710,7 @@ function updateNavChrome(){
 }
 
 function setActivePage(page){
-  ['empty','overview','month','campaign','event','settings'].forEach(p => {
+  ['empty','overview','month','campaign','event','layers','settings'].forEach(p => {
     const el = document.getElementById(p + 'Page');
     if (el) el.classList.toggle('active', p === page);
   });
@@ -2661,7 +2725,7 @@ function setActivePage(page){
       renderSettings();
     } else {
       document.getElementById('emptyPage').classList.add('active');
-      ['overview','month','campaign','event','settings'].forEach(p => {
+      ['overview','month','campaign','event','layers','settings'].forEach(p => {
         document.getElementById(p + 'Page').classList.remove('active');
       });
     }
@@ -2671,7 +2735,8 @@ function setActivePage(page){
   if (page === 'overview') renderOverview();
   if (page === 'month') renderMonth();
   if (page === 'campaign') renderCampaign();
-  if (page === 'event') renderEvent();
+  if (page === 'event') { renderEvent(); renderDidNotRun(); }
+  if (page === 'layers') renderLayers();
   if (page === 'settings') renderSettings();
   fixTableOverflow();
   window.scrollTo({top:0});
@@ -3853,6 +3918,210 @@ function renderEvent(){
 // ============================================
 // SETTINGS
 // ============================================
+// ============================================
+// LAYERS — the layers that make up event sales
+// ============================================
+function didNotRun(ev){ return (ev.total || 0) === 0 && (ev.orders || 0) === 0; }
+function normalizeDates(events){
+  for (const e of events) {
+    const d = new Date(e.startDate);
+    if (isNaN(d.getTime())) continue;
+    e.year = d.getUTCFullYear();
+    e.month = d.getUTCMonth();
+  }
+}
+const fmtPct0 = v => (isFinite(v) ? (v * 100).toFixed(0) + '%' : '—');
+const lyCatTag = c => `<span class="cat-tag">${escapeHtml(c || 'Other')}</span>`;
+
+function renderLayers(){
+  const scope = getActiveScope();
+  const primary = STATE.primaryYear, bench = benchYear();
+  const others = STATE.years.filter(y => y !== primary);
+  document.getElementById('lyTitle').textContent = `${primary} sales, layer by layer`;
+  const sb = document.getElementById('lyScopeBar');
+  sb.innerHTML = `<div class="scopebar">
+    <span class="scope-item"><span class="scope-k">Season</span><span class="scope-v prim">${primary}</span></span>
+    <span class="scope-sep"></span>
+    <span class="scope-item"><span class="scope-k">Benchmark</span>${bench ? `<select id="lyBench" class="sel-inline" aria-label="Benchmark year">${others.map(y => `<option value="${y}"${y===bench?' selected':''}>${y}</option>`).join('')}</select>` : '<span class="scope-v">—</span>'}</span>
+    <span class="scope-sep"></span>
+    <span class="scope-item"><span class="scope-k">Scope</span><span class="scope-v">${scope.label}</span></span>
+  </div>`;
+  const sel = document.getElementById('lyBench');
+  if (sel) sel.addEventListener('change', e => { STATE.matrixCompareYear = Number(e.target.value); renderLayers(); });
+
+  const primEvs = eventsInScope(primary, scope);
+  const benchEvs = bench ? eventsInScope(bench, scope) : [];
+  renderBridge(primary, bench, primEvs, benchEvs);
+  renderShiftProductivity(primary, bench, primEvs, benchEvs);
+  renderMoneyMix(primary, bench, primEvs, benchEvs);
+  renderConcentration(primary, scope);
+}
+
+// ---- 1. Year-over-year bridge: bench total -> same events grew/declined, new, lost -> primary total
+function renderBridge(primary, bench, primEvs, benchEvs){
+  const el = document.getElementById('bridgeBody');
+  const sub = document.getElementById('bridgeSub');
+  if (!bench) { sub.textContent = ''; el.innerHTML = `<p class="ly-empty">Add a second season to build the bridge.</p>`; return; }
+  sub.textContent = `— ${bench} to ${primary}`;
+  const m = matchEventsByName(benchEvs, primEvs);
+  const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
+  const grew = m.matched.filter(x => x.b.total > x.a.total);
+  const decl = m.matched.filter(x => x.b.total < x.a.total);
+  const startV = sum(benchEvs, e => e.total), endV = sum(primEvs, e => e.total);
+  const steps = [
+    { lbl: `${bench}`, v: startV, abs: true },
+    { lbl: 'Same events, grew', v: sum(grew, x => x.b.total - x.a.total), n: grew.length },
+    { lbl: 'Same events, declined', v: sum(decl, x => x.b.total - x.a.total), n: decl.length },
+    { lbl: 'New events', v: sum(m.newOnes, o => o.total), n: m.newOnes.length },
+    { lbl: 'Lost events', v: -sum(m.lostOnes, o => o.total), n: m.lostOnes.length },
+    { lbl: `${primary}`, v: endV, abs: true },
+  ];
+  let run = 0; const bars = [];
+  for (const s of steps) {
+    if (s.abs) { bars.push({ ...s, lo: 0, hi: s.v }); run = s.v; }
+    else { bars.push({ ...s, lo: Math.min(run, run + s.v), hi: Math.max(run, run + s.v) }); run += s.v; }
+  }
+  const max = Math.max(...bars.map(b => b.hi), 1);
+  const H = 180;
+  const sameNet = steps[1].v + steps[2].v;
+  const pct = startV ? (endV - startV) / startV : null;
+  let html = `<p class="ly-head-line">${primary} is <b class="${deltaClass(endV - startV)}">${fmtDelta$(endV - startV)}${pct != null ? ` (${fmtPct(pct)})` : ''}</b> against ${bench}:
+    the ${m.matched.length} events worked both years are <b class="${deltaClass(sameNet)}">${fmtDelta$(sameNet)}</b> net,
+    ${m.newOnes.length} new event${m.newOnes.length===1?'':'s'} added <b class="delta-up">${fmtDelta$(steps[3].v)}</b>,
+    and ${m.lostOnes.length} event${m.lostOnes.length===1?'':'s'} not worked this year took <b class="delta-dn">${fmtDelta$(steps[4].v)}</b> with them.</p>`;
+  html += `<div class="wf">`;
+  for (const b of bars) {
+    const top = H - (b.hi / max) * H, h = Math.max(2, ((b.hi - b.lo) / max) * H);
+    const cls = b.abs ? 'wf-abs' : (b.v >= 0 ? 'wf-up' : 'wf-dn');
+    html += `<div class="wf-col"><div class="wf-val ${b.abs ? '' : deltaClass(b.v)}">${b.abs ? fmt$(b.v) : fmtDelta$(b.v)}</div><div class="wf-track" style="height:${H}px"><div class="wf-bar ${cls}" style="top:${top.toFixed(1)}px;height:${h.toFixed(1)}px"></div></div><div class="wf-lbl">${b.lbl}${b.n != null ? `<span class="dim"> · ${b.n}</span>` : ''}</div></div>`;
+  }
+  html += `</div>`;
+  const top = (arr, f, n = 6) => arr.slice().sort((x, y) => Math.abs(f(y)) - Math.abs(f(x))).slice(0, n);
+  const li = (name, cat, delta) => `<li><span class="ly-name" title="${escapeHtml(name)}">${escapeHtml(name)} ${lyCatTag(cat)}</span><span class="r ${deltaClass(delta)}">${fmtDelta$(delta)}</span></li>`;
+  const lists = [
+    ['Same events, grew', top(grew, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
+    ['Same events, declined', top(decl, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
+    ['New events', top(m.newOnes, o => o.total).map(o => li(o.eventDisplay, o.category, o.total))],
+    ['Lost events', top(m.lostOnes, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total))],
+  ];
+  html += `<div class="ly-grid4">` + lists.map(([t, items]) => `<div class="ly-list"><div class="ly-list-t">${t}</div>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="dim" style="font-size:12px;margin:0;">None</p>`}</div>`).join('') + `</div>`;
+  html += `<p class="ly-note">Events match across seasons by name (monthly series by name and month), the same way the By Event page matches them. Events with no sales and no orders are excluded.</p>`;
+  el.innerHTML = html;
+}
+
+// ---- 2. Productivity per shift (shifts come from the Show Shift Schedule via the automation)
+function renderShiftProductivity(primary, bench, primEvs, benchEvs){
+  const el = document.getElementById('shiftBody');
+  const withS = evs => evs.filter(e => typeof e.shifts === 'number' && e.shifts > 0);
+  const P = withS(primEvs), B = withS(benchEvs);
+  if (!P.length) { el.innerHTML = `<p class="ly-empty">No shift data for ${primary} yet. Shift counts are added from the Show Shift Schedule by the campaign refresh.</p>`; return; }
+  const tot = evs => evs.reduce((a, e) => ({ cpo: a.cpo + e.total, orders: a.orders + e.orders, shifts: a.shifts + e.shifts, n: a.n + 1 }), { cpo: 0, orders: 0, shifts: 0, n: 0 });
+  const agg = evs => { const o = {}; for (const e of evs) { const c = e.category || 'Other'; o[c] = o[c] || { cpo: 0, orders: 0, shifts: 0, n: 0 }; o[c].cpo += e.total; o[c].orders += e.orders; o[c].shifts += e.shifts; o[c].n++; } return o; };
+  const aP = agg(P), aB = agg(B), tP = tot(P), tB = tot(B);
+  const per = t => (t && t.shifts ? t.cpo / t.shifts : null);
+  const ops = t => (t && t.shifts ? (t.orders / t.shifts).toFixed(2) : '—');
+  let html = `<div class="ly-kpis">` + [
+    ['CPO per shift', fmt$(per(tP)), bench && per(tB) != null ? `${bench}: ${fmt$(per(tB))} · ${deltaArrow(per(tP) - per(tB))} ${fmtPct((per(tP) - per(tB)) / per(tB))}` : ''],
+    ['Orders per shift', ops(tP), bench && tB.shifts ? `${bench}: ${ops(tB)}` : ''],
+    ['Shifts worked', fmtN(tP.shifts), `${P.length} of ${primEvs.length} ${primary} events have schedule data`],
+  ].map(([l, v, s]) => `<div class="kpi-tile"><div class="kpi-lbl">${l}</div><div class="kpi-hero">${v}</div><div class="kpi-sub">${s}</div></div>`).join('') + `</div>`;
+  html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th><th class="r">Events</th><th class="r">Shifts</th><th class="r">CPO</th><th class="r">CPO / shift</th>${bench ? `<th class="r">${bench} CPO / shift</th><th class="r">Δ</th>` : ''}<th class="r">Orders / shift</th></tr></thead><tbody>`;
+  for (const c of CAT_ORDER) {
+    const p = aP[c]; if (!p) continue;
+    const pp = per(p), pb = per(aB[c]);
+    html += `<tr><td class="cat">${c}</td><td class="r">${p.n}</td><td class="r">${p.shifts}</td><td class="r">${fmt$(p.cpo)}</td><td class="r">${fmt$(pp)}</td>`;
+    if (bench) html += `<td class="r">${pb != null ? fmt$(pb) : '<span class="dim">—</span>'}</td>` + (pb ? `<td class="r ${deltaClass(pp - pb)}">${deltaArrow(pp - pb)} ${fmtPct((pp - pb) / pb)}</td>` : `<td class="r"><span class="dim">—</span></td>`);
+    html += `<td class="r">${ops(p)}</td></tr>`;
+  }
+  html += `<tr class="total"><td class="cat">All with schedule data</td><td class="r">${tP.n}</td><td class="r">${tP.shifts}</td><td class="r">${fmt$(tP.cpo)}</td><td class="r">${fmt$(per(tP))}</td>${bench ? `<td class="r">${per(tB) != null ? fmt$(per(tB)) : '—'}</td><td class="r"></td>` : ''}<td class="r">${ops(tP)}</td></tr></tbody></table></div>`;
+  const rows = P.map(e => ({ e, ps: e.total / e.shifts })).sort((a, b) => b.ps - a.ps);
+  const benchBy = {}; for (const e of B) benchBy[e.eventNorm] = e.total / e.shifts;
+  const row = r => `<tr><td><span class="ly-name" title="${escapeHtml(r.e.eventDisplay)}">${escapeHtml(r.e.eventDisplay)}</span> ${lyCatTag(r.e.category)}</td><td class="r">${r.e.shifts}</td><td class="r">${fmt$(r.e.total)}</td><td class="r">${fmt$(r.ps)}</td><td class="r">${benchBy[r.e.eventNorm] != null ? fmt$(benchBy[r.e.eventNorm]) : '<span class="dim">—</span>'}</td></tr>`;
+  const tbl = (title, rs) => `<div><div class="ly-list-t">${title}</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Event</th><th class="r">Shifts</th><th class="r">CPO</th><th class="r">CPO / shift</th><th class="r">${bench ? bench + ' / shift' : ''}</th></tr></thead><tbody>${rs.map(row).join('')}</tbody></table></div></div>`;
+  html += `<div class="ly-grid2">${tbl('Most productive per shift', rows.slice(0, 8))}${tbl('Least productive per shift', rows.slice(-8).reverse())}</div>`;
+  const missing = primEvs.length - P.length;
+  if (missing) html += `<p class="ly-note">${missing} ${primary} event${missing === 1 ? '' : 's'} without schedule data (service events, realtor offices and industry events are rarely on the shift schedule) are left out of every per-shift figure.</p>`;
+  el.innerHTML = html;
+}
+
+// ---- 3. Where the money comes from: booth vs service call / free look / other
+function renderMoneyMix(primary, bench, primEvs, benchEvs){
+  const el = document.getElementById('moneyBody');
+  const parts = [['booth', 'At the booth', 'var(--ember)'], ['sc', 'Service call', 'var(--info)'], ['fl', 'Free look', 'var(--pos-bar)'], ['other', 'Other', 'var(--faded)']];
+  const agg = evs => {
+    const o = {};
+    const add = (k, e) => { o[k] = o[k] || { booth: 0, sc: 0, fl: 0, other: 0, total: 0 }; for (const [p] of parts) o[k][p] += e[p] || 0; o[k].total += e.total; };
+    for (const e of evs) { add(e.category || 'Other', e); add('__all', e); }
+    return o;
+  };
+  const aP = agg(primEvs), aB = agg(benchEvs);
+  const tail = t => (t && t.total ? (t.sc + t.fl + t.other) / t.total : null);
+  const bar = t => (!t || !t.total) ? '<span class="dim">—</span>' : `<div class="mix">${parts.map(([p, l, c]) => { const w = t[p] / t.total * 100; return w > 0 ? `<span class="mix-seg" style="width:${w.toFixed(2)}%;background:${c}" title="${l} ${fmt$(t[p])} (${w.toFixed(0)}%)"></span>` : ''; }).join('')}</div>`;
+  const all = aP.__all;
+  if (!all || !all.total) { el.innerHTML = `<p class="ly-empty">No sales in scope for ${primary}.</p>`; return; }
+  const tP = tail(all), tBn = tail(aB.__all);
+  let html = `<div class="mix-legend">${parts.map(([p, l, c]) => `<span><i style="background:${c}"></i>${l}</span>`).join('')}</div>`;
+  html += `<div class="ly-kpis">` + [
+    ['At the booth', fmtPct0(all.booth / all.total), `${fmt$(all.booth)} of ${fmt$(all.total)}`],
+    ['After the booth', fmtPct0(tP), `${fmt$(all.sc + all.fl + all.other)} · service call ${fmtPct0(all.sc / all.total)}, free look ${fmtPct0(all.fl / all.total)}, other ${fmtPct0(all.other / all.total)}`],
+    [bench ? `After the booth vs ${bench}` : 'Benchmark', tBn != null ? `${deltaArrow(tP - tBn)} ${((tP - tBn) * 100).toFixed(1)} pts` : '—', tBn != null ? `${bench}: ${fmtPct0(tBn)} after the booth` : ''],
+  ].map(([l, v, s]) => `<div class="kpi-tile"><div class="kpi-lbl">${l}</div><div class="kpi-hero">${v}</div><div class="kpi-sub">${s}</div></div>`).join('') + `</div>`;
+  html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th><th>Mix</th><th class="r">CPO</th><th class="r">Booth</th><th class="r">Service call</th><th class="r">Free look</th><th class="r">Other</th><th class="r">After the booth</th>${bench ? `<th class="r">vs ${bench}</th>` : ''}</tr></thead><tbody>`;
+  for (const c of CAT_ORDER) {
+    const t = aP[c]; if (!t || !t.total) continue;
+    const tb = tail(aB[c]);
+    html += `<tr><td class="cat">${c}</td><td>${bar(t)}</td><td class="r">${fmt$(t.total)}</td><td class="r">${fmtPct0(t.booth / t.total)}</td><td class="r">${fmtPct0(t.sc / t.total)}</td><td class="r">${fmtPct0(t.fl / t.total)}</td><td class="r">${fmtPct0(t.other / t.total)}</td><td class="r">${fmtPct0(tail(t))}</td>${bench ? `<td class="r ${tb != null ? deltaClass(tail(t) - tb) : ''}">${tb != null ? `${deltaArrow(tail(t) - tb)} ${((tail(t) - tb) * 100).toFixed(1)} pts` : '<span class="dim">—</span>'}</td>` : ''}</tr>`;
+  }
+  html += `<tr class="total"><td class="cat">All</td><td>${bar(all)}</td><td class="r">${fmt$(all.total)}</td><td class="r">${fmtPct0(all.booth / all.total)}</td><td class="r">${fmtPct0(all.sc / all.total)}</td><td class="r">${fmtPct0(all.fl / all.total)}</td><td class="r">${fmtPct0(all.other / all.total)}</td><td class="r">${fmtPct0(tP)}</td>${bench ? `<td class="r">${tBn != null ? `${deltaArrow(tP - tBn)} ${((tP - tBn) * 100).toFixed(1)} pts` : '—'}</td>` : ''}</tr></tbody></table></div>`;
+  html += `<p class="ly-note">"After the booth" is every dollar VectorConnect ties to the event that was not written at the table: service calls, free looks and other orders. It is the part of an event's value that follow-up drives.</p>`;
+  el.innerHTML = html;
+}
+
+// ---- 4. Concentration: how much of the season rides on the biggest events
+function renderConcentration(primary, scope){
+  const el = document.getElementById('concBody');
+  const years = STATE.years.filter(y => y === primary || !STATE.kpiHiddenYears.has(y));
+  const calc = y => {
+    const evs = insightEvents(eventsInScope(y, scope)).slice().sort((a, b) => b.total - a.total);
+    const total = evs.reduce((a, e) => a + e.total, 0);
+    const share = n => (total ? evs.slice(0, n).reduce((a, e) => a + e.total, 0) / total : null);
+    let cum = 0, n80 = 0;
+    for (const e of evs) { cum += e.total; n80++; if (cum >= total * 0.8) break; }
+    return { y, evs, total, top1: share(1), top3: share(3), top10: share(10), n80: total ? n80 : null, count: evs.length };
+  };
+  const rows = years.map(calc);
+  const prim = rows.find(r => r.y === primary);
+  if (!prim || !prim.total) { el.innerHTML = `<p class="ly-empty">No sales in scope for ${primary}.</p>`; return; }
+  let html = `<div class="ly-kpis">` + [
+    ['Top 3 events', fmtPct0(prim.top3), `of ${primary} CPO in scope`],
+    ['Top 10 events', fmtPct0(prim.top10), `${prim.count} events in scope`],
+    ['Events to reach 80%', fmtN(prim.n80), `of ${fmt$(prim.total)}`],
+  ].map(([l, v, s]) => `<div class="kpi-tile"><div class="kpi-lbl">${l}</div><div class="kpi-hero">${v}</div><div class="kpi-sub">${s}</div></div>`).join('') + `</div>`;
+  html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Season</th><th class="r">Events</th><th class="r">CPO in scope</th><th class="r">#1 event</th><th class="r">Top 3</th><th class="r">Top 10</th><th class="r">Events to 80%</th></tr></thead><tbody>`;
+  for (const r of rows) html += `<tr${r.y === primary ? ' style="font-weight:600;"' : ''}><td class="cat">${r.y}</td><td class="r">${r.count}</td><td class="r">${fmt$(r.total)}</td><td class="r">${fmtPct0(r.top1)}</td><td class="r">${fmtPct0(r.top3)}</td><td class="r">${fmtPct0(r.top10)}</td><td class="r">${r.n80 != null ? r.n80 : '—'}</td></tr>`;
+  html += `</tbody></table></div>`;
+  let cum = 0;
+  html += `<div style="margin-top:16px;"><div class="ly-list-t">${primary} top 10</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th>Event</th><th></th><th class="r">CPO</th><th class="r">Share</th><th class="r">Cumulative</th></tr></thead><tbody>`;
+  prim.evs.slice(0, 10).forEach((e, i) => {
+    cum += e.total;
+    html += `<tr><td class="dim">${i + 1}</td><td><span class="ly-name" title="${escapeHtml(e.eventDisplay)}">${escapeHtml(e.eventDisplay)}</span> ${lyCatTag(e.category)}</td><td><div class="conc-bar"><i style="width:${(e.total / prim.evs[0].total * 100).toFixed(1)}%"></i></div></td><td class="r">${fmt$(e.total)}</td><td class="r">${fmtPct0(e.total / prim.total)}</td><td class="r">${fmtPct0(cum / prim.total)}</td></tr>`;
+  });
+  html += `</tbody></table></div></div>`;
+  el.innerHTML = html;
+}
+
+// ---- By Event: the events excluded from every total because they never ran
+function renderDidNotRun(){
+  const el = document.getElementById('evDnrPanel');
+  if (!el) return;
+  const yrs = [...new Set([STATE.evYearA, STATE.evYearB].filter(v => v != null))];
+  const list = STATE.events.filter(e => didNotRun(e) && yrs.includes(e.year)).sort((a, b) => (b.year - a.year) || (a.month - b.month));
+  if (!list.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = `<div class="phead"><div><span class="ptit2-eyebrow">Excluded from every total</span><div class="ptit2">Did not run <span class="ptit2-sub">— ${list.length} event${list.length === 1 ? '' : 's'} with no sales and no orders in ${yrs.join(' / ')}</span></div></div></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Event</th><th>Year</th><th>Month</th><th>Ranking</th></tr></thead><tbody>${list.map(e => `<tr><td>${escapeHtml(e.eventDisplay)}</td><td>${e.year}</td><td style="color:var(--mut);">${MONTH_NAMES[e.month]}</td><td>${lyCatTag(e.category)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
 function renderRerankPanel(){
   const listEl = document.getElementById('rerankList');
   const yrSel = document.getElementById('rerankYearFilter');
@@ -3928,6 +4197,7 @@ function renderRerankPanel(){
     if (ev.category === 'Unknown') badges += ` <span class="badge br" style="margin-left:6px;">unknown</span>`;
     else if (ev.autoAssigned) badges += ` <span class="badge bb" style="margin-left:6px;">auto · ${ev.autoAssigned}</span>`;
     if (edited) badges += ` <span class="badge by" style="margin-left:6px;">edited</span>`;
+    if (didNotRun(ev)) badges += ` <span class="badge" style="margin-left:6px;">did not run · excluded</span>`;
     html += `<tr>
       <td>${escapeHtml(ev.eventDisplay)}${badges}</td>
       <td class="num">${ev.year}</td>
