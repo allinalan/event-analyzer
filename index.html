@@ -1085,6 +1085,11 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
 .mix-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;}
 .conc-bar{height:8px;background:var(--surface-3);border-radius:4px;overflow:hidden;min-width:90px;}
 .conc-bar i{display:block;height:100%;background:var(--ember);}
+/* Layers tables sit two-up; a horizontally scrolling wrapper breaks the page's pinned
+   headers (they pin 48px below the wrapper top, under row 1), so headers are static here
+   and long event names are capped instead of forcing the table wider than its column. */
+#layersPage .tbl th{position:static;}
+#layersPage .tbl td .ly-name{display:inline-block;max-width:280px;vertical-align:bottom;}
 </style>
 </head>
 <body>
