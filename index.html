@@ -4052,6 +4052,20 @@ function renderBridge(primary, bench, primEvs, benchEvs){
   }
   html += `<tr class="total"><td class="cat">All in scope</td><td class="r">${sB.length}</td><td class="r">${sP.length}</td><td class="r ${deltaClass(sP.length - sB.length)}">${deltaArrow(sP.length - sB.length)} ${fmtDeltaN(sP.length - sB.length)}</td><td class="r">${fmt$(svcStart)}</td><td class="r">${fmt$(svcEnd)}</td><td class="r ${deltaClass(svcEnd - svcStart)}">${deltaArrow(svcEnd - svcStart)} ${fmtDelta$(svcEnd - svcStart)}</td><td class="r">${fmt$(avg(sP))}</td></tr></tbody></table></div>`;
 
+  // service events that never produced an order: listed here so nobody wonders where they went
+  const zeroSvc = STATE.events.filter(e => e.category === 'Service Event' && didNotRun(e) && (e.year === primary || e.year === bench)).sort((a, b) => a.startDate.localeCompare(b.startDate));
+  if (zeroSvc.length) {
+    html += `<div style="height:14px;"></div><div class="ly-list-t">Service events with no sales and no orders · not counted above (${zeroSvc.length})</div>`;
+    html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Event</th><th>Season</th><th>Campaign</th></tr></thead><tbody>`;
+    for (const e of zeroSvc) {
+      const camp = e.month <= 3 ? 'Campaign I' : e.month <= 7 ? 'Campaign II' : 'Campaign III';
+      html += `<tr><td style="white-space:nowrap;color:var(--mut);">${e.startDate.slice(0, 10)}</td><td>${escapeHtml(e.eventDisplay)}</td><td>${e.year}</td><td>${camp}</td></tr>`;
+    }
+    html += `</tbody></table></div><p class="ly-note">These are on VectorConnect's report for the campaign but closed with $0 and no orders, so they are treated as "did not run" everywhere on this page.</p>`;
+  } else {
+    html += `<p class="ly-note">No service events with $0 and no orders in ${bench} or ${primary}.</p>`;
+  }
+
   // other categories, net
   if (otherRows.length) {
     html += `<div style="height:22px;"></div><div class="ly-list-t">Everything else · net by category</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th><th class="r">${bench}</th><th class="r">${primary}</th><th class="r">Δ</th></tr></thead><tbody>`;
