@@ -3957,38 +3957,65 @@ function renderLayers(){
   renderConcentration(primary, scope);
 }
 
-// ---- 1. Year-over-year bridge: bench total -> same events grew/declined, new, lost -> primary total
+// ---- 1. Year-over-year bridge.
+// Name-matching (grew / declined / new / lost) only makes sense for booth shows: Elite, Key,
+// Traditional. Service events run as "blitzes" (strings of 6-7 per campaign) whose months and
+// venues move around, so for them the question is volume: are we matching last year's count
+// and dollars? Everything else (Mesa Marketplace, Malls, RLT, Industry, Other) reconciles as
+// one net line so the whole bridge still adds up to the season total.
+const BOOTH_CATS = new Set(['Elite', 'Key', 'Traditional']);
 function renderBridge(primary, bench, primEvs, benchEvs){
   const el = document.getElementById('bridgeBody');
   const sub = document.getElementById('bridgeSub');
   if (!bench) { sub.textContent = ''; el.innerHTML = `<p class="ly-empty">Add a second season to build the bridge.</p>`; return; }
   sub.textContent = `— ${bench} to ${primary}`;
-  const m = matchEventsByName(benchEvs, primEvs);
+  STATE.bridgeCat = STATE.bridgeCat || 'booth';
   const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
+  const startV = sum(benchEvs, e => e.total), endV = sum(primEvs, e => e.total);
+
+  // --- booth shows: name-matched
+  const inBooth = e => STATE.bridgeCat === 'booth' ? BOOTH_CATS.has(e.category) : e.category === STATE.bridgeCat;
+  const bP = primEvs.filter(inBooth), bB = benchEvs.filter(inBooth);
+  const m = matchEventsByName(bB, bP);
   const grew = m.matched.filter(x => x.b.total > x.a.total);
   const decl = m.matched.filter(x => x.b.total < x.a.total);
-  const startV = sum(benchEvs, e => e.total), endV = sum(primEvs, e => e.total);
+  const boothStart = sum(bB, e => e.total), boothEnd = sum(bP, e => e.total);
   const steps = [
-    { lbl: `${bench}`, v: startV, abs: true },
+    { lbl: `${bench}`, v: boothStart, abs: true },
     { lbl: 'Same events, grew', v: sum(grew, x => x.b.total - x.a.total), n: grew.length },
     { lbl: 'Same events, declined', v: sum(decl, x => x.b.total - x.a.total), n: decl.length },
     { lbl: 'New events', v: sum(m.newOnes, o => o.total), n: m.newOnes.length },
-    { lbl: 'Lost events', v: -sum(m.lostOnes, o => o.total), n: m.lostOnes.length },
-    { lbl: `${primary}`, v: endV, abs: true },
+    { lbl: 'Not worked (yet)', v: -sum(m.lostOnes, o => o.total), n: m.lostOnes.length },
+    { lbl: `${primary}`, v: boothEnd, abs: true },
   ];
   let run = 0; const bars = [];
-  for (const s of steps) {
-    if (s.abs) { bars.push({ ...s, lo: 0, hi: s.v }); run = s.v; }
-    else { bars.push({ ...s, lo: Math.min(run, run + s.v), hi: Math.max(run, run + s.v) }); run += s.v; }
+  for (const st of steps) {
+    if (st.abs) { bars.push({ ...st, lo: 0, hi: st.v }); run = st.v; }
+    else { bars.push({ ...st, lo: Math.min(run, run + st.v), hi: Math.max(run, run + st.v) }); run += st.v; }
   }
   const max = Math.max(...bars.map(b => b.hi), 1);
   const H = 180;
-  const sameNet = steps[1].v + steps[2].v;
+
+  // --- service events: volume
+  const sP = primEvs.filter(e => e.category === 'Service Event'), sB = benchEvs.filter(e => e.category === 'Service Event');
+  const svcStart = sum(sB, e => e.total), svcEnd = sum(sP, e => e.total);
+
+  // --- everything else, per category
+  const otherCats = CAT_ORDER.filter(c => !BOOTH_CATS.has(c) && c !== 'Service Event');
+  const otherRows = otherCats.map(c => ({ c, a: sum(benchEvs.filter(e => e.category === c), e => e.total), b: sum(primEvs.filter(e => e.category === c), e => e.total) })).filter(r => r.a || r.b);
+  const otherDelta = otherRows.reduce((a, r) => a + (r.b - r.a), 0);
+  const allBoothStart = sum(benchEvs.filter(e => BOOTH_CATS.has(e.category)), e => e.total), allBoothEnd = sum(primEvs.filter(e => BOOTH_CATS.has(e.category)), e => e.total);
+
   const pct = startV ? (endV - startV) / startV : null;
-  let html = `<p class="ly-head-line">${primary} is <b class="${deltaClass(endV - startV)}">${fmtDelta$(endV - startV)}${pct != null ? ` (${fmtPct(pct)})` : ''}</b> against ${bench}:
-    the ${m.matched.length} events worked both years are <b class="${deltaClass(sameNet)}">${fmtDelta$(sameNet)}</b> net,
-    ${m.newOnes.length} new event${m.newOnes.length===1?'':'s'} added <b class="delta-up">${fmtDelta$(steps[3].v)}</b>,
-    and ${m.lostOnes.length} event${m.lostOnes.length===1?'':'s'} not worked this year took <b class="delta-dn">${fmtDelta$(steps[4].v)}</b> with them.</p>`;
+  let html = `<p class="ly-head-line">${primary} is <b class="${deltaClass(endV - startV)}">${fmtDelta$(endV - startV)}${pct != null ? ` (${fmtPct(pct)})` : ''}</b> against ${bench}.
+    Booth shows (Elite, Key, Traditional) are <b class="${deltaClass(allBoothEnd - allBoothStart)}">${fmtDelta$(allBoothEnd - allBoothStart)}</b>,
+    service events <b class="${deltaClass(svcEnd - svcStart)}">${fmtDelta$(svcEnd - svcStart)}</b> on ${sP.length} vs ${sB.length} events,
+    everything else <b class="${deltaClass(otherDelta)}">${fmtDelta$(otherDelta)}</b>.</p>`;
+
+  // chips
+  const chips = [['booth', 'Booth shows'], ['Elite', 'Elite'], ['Key', 'Key'], ['Traditional', 'Traditional']];
+  html += `<div class="chip-row" id="bridgeChips"><span class="chip-lbl">Name-matched</span>${chips.map(([k, l]) => `<button class="chip ${STATE.bridgeCat === k ? 'active' : ''}" data-cat="${k}">${l}</button>`).join('')}</div><div style="height:12px;"></div>`;
+  html += `<div class="ly-list-t">${STATE.bridgeCat === 'booth' ? 'Booth shows' : STATE.bridgeCat} · ${bench} to ${primary}</div>`;
   html += `<div class="wf">`;
   for (const b of bars) {
     const top = H - (b.hi / max) * H, h = Math.max(2, ((b.hi - b.lo) / max) * H);
@@ -4002,11 +4029,37 @@ function renderBridge(primary, bench, primEvs, benchEvs){
     ['Same events, grew', top(grew, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
     ['Same events, declined', top(decl, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
     ['New events', top(m.newOnes, o => o.total).map(o => li(o.eventDisplay, o.category, o.total))],
-    ['Lost events', top(m.lostOnes, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total))],
+    ['Not worked (yet)', top(m.lostOnes, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total))],
   ];
   html += `<div class="ly-grid4">` + lists.map(([t, items]) => `<div class="ly-list"><div class="ly-list-t">${t}</div>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="dim" style="font-size:12px;margin:0;">None</p>`}</div>`).join('') + `</div>`;
-  html += `<p class="ly-note">Events match across seasons by name (monthly series by name and month), the same way the By Event page matches them. Events with no sales and no orders are excluded.</p>`;
+  html += `<p class="ly-note">Booth shows match across seasons by name (monthly series by name and month), the same way the By Event page matches them. A show that moved to a later month (Prescott Labor Day, Aug 2025 → Sep 2026) sits in "not worked (yet)" until that month is in scope.</p>`;
+
+  // service events volume
+  const avg = (evs) => evs.length ? sum(evs, e => e.total) / evs.length : 0;
+  html += `<div style="height:22px;"></div><div class="ly-list-t">Service events · volume check (blitzes move months and venues, so no name matching)</div>`;
+  html += `<div class="ly-kpis">` + [
+    ['Service events worked', `${sP.length}`, `${bench}: ${sB.length} · ${fmtDeltaN(sP.length - sB.length)}`],
+    ['Service event CPO', fmt$(svcEnd), `${bench}: ${fmt$(svcStart)} · ${deltaArrow(svcEnd - svcStart)} ${svcStart ? fmtPct((svcEnd - svcStart) / svcStart) : '—'}`],
+    ['Average per service event', fmt$(avg(sP)), `${bench}: ${fmt$(avg(sB))} · ${deltaArrow(avg(sP) - avg(sB))} ${avg(sB) ? fmtPct((avg(sP) - avg(sB)) / avg(sB)) : '—'}`],
+  ].map(([l, v, sb]) => `<div class="kpi-tile"><div class="kpi-lbl">${l}</div><div class="kpi-hero">${v}</div><div class="kpi-sub">${sb}</div></div>`).join('') + `</div>`;
+  const CAMPS = [['Campaign I', 0, 3], ['Campaign II', 4, 7], ['Campaign III', 8, 11]];
+  html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Campaign</th><th class="r">${bench} events</th><th class="r">${primary} events</th><th class="r">Δ events</th><th class="r">${bench} CPO</th><th class="r">${primary} CPO</th><th class="r">Δ CPO</th><th class="r">${primary} avg / event</th></tr></thead><tbody>`;
+  for (const [lbl, m0, m1] of CAMPS) {
+    const a = sB.filter(e => e.month >= m0 && e.month <= m1), b = sP.filter(e => e.month >= m0 && e.month <= m1);
+    if (!a.length && !b.length) continue;
+    const ca = sum(a, e => e.total), cb = sum(b, e => e.total);
+    html += `<tr><td class="cat">${lbl}</td><td class="r">${a.length}</td><td class="r">${b.length}</td><td class="r ${deltaClass(b.length - a.length)}">${deltaArrow(b.length - a.length)} ${fmtDeltaN(b.length - a.length)}</td><td class="r">${fmt$(ca)}</td><td class="r">${fmt$(cb)}</td><td class="r ${deltaClass(cb - ca)}">${deltaArrow(cb - ca)} ${fmtDelta$(cb - ca)}</td><td class="r">${fmt$(avg(b))}</td></tr>`;
+  }
+  html += `<tr class="total"><td class="cat">All in scope</td><td class="r">${sB.length}</td><td class="r">${sP.length}</td><td class="r ${deltaClass(sP.length - sB.length)}">${deltaArrow(sP.length - sB.length)} ${fmtDeltaN(sP.length - sB.length)}</td><td class="r">${fmt$(svcStart)}</td><td class="r">${fmt$(svcEnd)}</td><td class="r ${deltaClass(svcEnd - svcStart)}">${deltaArrow(svcEnd - svcStart)} ${fmtDelta$(svcEnd - svcStart)}</td><td class="r">${fmt$(avg(sP))}</td></tr></tbody></table></div>`;
+
+  // other categories, net
+  if (otherRows.length) {
+    html += `<div style="height:22px;"></div><div class="ly-list-t">Everything else · net by category</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th><th class="r">${bench}</th><th class="r">${primary}</th><th class="r">Δ</th></tr></thead><tbody>`;
+    for (const r of otherRows) html += `<tr><td class="cat">${r.c}</td><td class="r">${fmt$(r.a)}</td><td class="r">${fmt$(r.b)}</td><td class="r ${deltaClass(r.b - r.a)}">${deltaArrow(r.b - r.a)} ${fmtDelta$(r.b - r.a)}</td></tr>`;
+    html += `</tbody></table></div>`;
+  }
   el.innerHTML = html;
+  el.querySelectorAll('#bridgeChips .chip').forEach(c => c.addEventListener('click', () => { STATE.bridgeCat = c.dataset.cat; renderBridge(primary, bench, primEvs, benchEvs); }));
 }
 
 // ---- 2. Productivity per shift (shifts come from the Show Shift Schedule via the automation)
