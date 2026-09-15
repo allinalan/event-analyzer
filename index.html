@@ -1939,6 +1939,7 @@ function saveStorage(){
       events: STATE.events,
       editedEventKeys: [...STATE.editedEventKeys],
       kpiHiddenYears: [...STATE.kpiHiddenYears],
+      schedule: STATE.schedule || null,
       lastUpdated: new Date().toISOString()
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -1956,6 +1957,7 @@ function loadStorage(){
     STATE.events = obj.events;
     STATE.editedEventKeys = new Set(obj.editedEventKeys || []);
     STATE.kpiHiddenYears = new Set((obj.kpiHiddenYears || []).map(Number));
+    STATE.schedule = obj.schedule || null;
     rebuildDerived();
     return STATE.events.length > 0;
   } catch (e) {
@@ -1970,6 +1972,7 @@ function buildPayload(){
     events: STATE.events,
     editedEventKeys: [...STATE.editedEventKeys],
     kpiHiddenYears: [...STATE.kpiHiddenYears],
+    schedule: STATE.schedule || null,
     lastUpdated: new Date().toISOString()
   };
 }
@@ -2006,6 +2009,7 @@ async function loadPublishedData(hadLocal){
     STATE.events = obj.events;
     STATE.editedEventKeys = new Set(obj.editedEventKeys || []);
     STATE.kpiHiddenYears = new Set((obj.kpiHiddenYears || []).map(Number));
+    STATE.schedule = obj.schedule || null;
     rebuildDerived();
     updateNavChrome();
     setActivePage('overview');
@@ -3775,6 +3779,7 @@ const EV_TABS = [
   {key:'declined', lbl:'Top decliners'},
   {key:'new',      lbl:'New this year'},
   {key:'lost',     lbl:"Didn't return"},
+  {key:'moved',    lbl:'Moved later'},
 ];
 
 function renderEvent(){
@@ -3804,14 +3809,16 @@ function renderEvent(){
   const evsB = allB.filter(e => !isSvc(e));
   const m0 = matchEventsByName(evsA, evsB);
   const notYet = partialB ? m0.lostOnes.filter(o => o.month > lastMonthB) : [];
-  const m = { ...m0, lostOnes: m0.lostOnes.filter(o => !notYet.includes(o)) };
+  // Booked on the Show Shift Schedule for a later month this year: moved, not lost.
+  const moved = findMovedLater(m0.lostOnes.filter(o => !notYet.includes(o)), STATE.evYearB, lastMonthB, evsB);
+  const m = { ...m0, lostOnes: m0.lostOnes.filter(o => !notYet.includes(o) && !moved.has(o)) };
 
   const ALLOWED_NEW = new Set(['Elite', 'Key', 'Traditional']);
   const eligibleNew = m.newOnes.filter(o => ALLOWED_NEW.has(o.category));
 
   const campLbl = STATE.evCampaign === 'all' ? '' : ` • Campaign ${['', 'I', 'II', 'III'][STATE.evCampaign]}`;
   document.getElementById('evMatchSummary').textContent =
-    `${m.matched.length} matched • ${eligibleNew.length} new (Elite/Key/Traditional) in ${STATE.evYearB} • ${m.lostOnes.length} didn't return${campLbl}` +
+    `${m.matched.length} matched • ${eligibleNew.length} new (Elite/Key/Traditional) in ${STATE.evYearB} • ${m.lostOnes.length} didn't return • ${moved.size} moved later${campLbl}` +
     (notYet.length ? ` • ${notYet.length} from ${MONTH_NAMES[lastMonthB + 1]}–Dec not reached yet in ${STATE.evYearB}` : '') +
     ` • service events ${svcB.length} vs ${svcA.length} (volume, not name-matched)`;
 
@@ -3832,6 +3839,7 @@ function renderEvent(){
     declined: m.matched.filter(x => x.b.total - x.a.total < 0).length,
     'new': eligibleNew.length,
     lost: m.lostOnes.length,
+    moved: moved.size,
   };
   const tabsEl = document.getElementById('evSubtabs');
   tabsEl.innerHTML = EV_TABS.map(t =>
@@ -3900,6 +3908,13 @@ function renderEvent(){
     renderServiceVolume(svcA, svcB, partialB ? lastMonthB : 11);
     return;
   }
+  if (tab === 'moved') {
+    let mv = [...moved.values()];
+    if (STATE.evCatFilter !== 'all') mv = mv.filter(x => x.o.category === STATE.evCatFilter);
+    if (STATE.evSearch) { const q = STATE.evSearch.toLowerCase(); mv = mv.filter(x => x.o.eventDisplay.toLowerCase().includes(q)); }
+    renderMovedTable(mv);
+    return;
+  }
 
   const maxAbs = rows.reduce((mx,r) => Math.max(mx, Math.abs(r.diff)||0), 0);
   const sortIcon = key => STATE.evSort === key ? '<span class="s-ind">▼</span>' : '<span class="s-ind">▽</span>';
@@ -3955,6 +3970,64 @@ function renderEvent(){
     if (sel) sel.value = STATE.evSort;
     renderEvent();
   }));
+}
+
+// ---- "Moved later": a prior-season event that is booked on the Show Shift Schedule for a
+// month this season has not reached yet. Same normalization the automation uses for schedule
+// names (lib/schedule-colors.js scheduleNorm), plus trailing date fragments like "4/12".
+function schedNorm(name){
+  let s = normalizeEventName(name);
+  s = s.replace(/\([^)]*\)/g, ' ')
+    .replace(/#\s*\d+/g, ' ')
+    .replace(/\b(wk|week|w)\s*\d+\b/g, ' ')
+    .replace(/\bbooth\b.*$/g, ' ')
+    .replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, ' ')
+    .replace(/[^a-z0-9&' ]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  return stripPeriodSuffix(s);
+}
+const campaignOfMonth = m => (m <= 3 ? 'Campaign I' : m <= 7 ? 'Campaign II' : 'Campaign III');
+function namesAgree(a, b){
+  if (a === b) return true;
+  const ta = new Set(a.split(' ').filter(t => t.length >= 3)), tb = new Set(b.split(' ').filter(t => t.length >= 3));
+  if (ta.size < 2 || tb.size < 2) return false;
+  const [small, big] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
+  return [...small].every(t => big.has(t));   // the shorter name is contained in the longer
+}
+// lostOnes: matcher groups from the prior season; returns Map group -> { o, sched }
+function findMovedLater(lostOnes, yearB, lastMonthB, reachedB){
+  const out = new Map();
+  const sched = STATE.schedule && Number(STATE.schedule.year) === yearB ? (STATE.schedule.events || []) : [];
+  if (!sched.length) return out;
+  const later = sched.filter(s => Number(s.start.slice(5, 7)) - 1 > lastMonthB).map(s => ({ ...s, n: schedNorm(s.name) }));
+  if (!later.length) return out;
+  const reachedNorms = new Set(reachedB.map(e => schedNorm(e.eventRaw)));
+  for (const o of lostOnes) {
+    const n = schedNorm(o.eventNorm || o.eventDisplay);
+    if (!n || reachedNorms.has(n)) continue;              // the series already ran this season
+    const hit = later.find(s => namesAgree(n, s.n));
+    if (hit) out.set(o, { o, sched: hit });
+  }
+  return out;
+}
+function renderMovedTable(rows){
+  const yA = STATE.evYearA, yB = STATE.evYearB;
+  let html = `<thead><tr><th>Event</th><th>Ranking</th><th>${yA}</th><th>${yB} booking</th><th>Campaign shift</th><th class="r">${yA} CPO</th><th class="r">${yA} Ord</th><th>Schedule status</th></tr></thead><tbody>`;
+  if (!rows.length) html += `<tr><td colspan="8" style="text-align:center;padding:34px 20px;color:var(--mut);">Nothing here: no prior-season event in this scope is booked for a later month in ${yB}.</td></tr>`;
+  rows.sort((x, y) => y.o.total - x.o.total);
+  for (const { o, sched } of rows) {
+    const mB = Number(sched.start.slice(5, 7)) - 1;
+    const shift = campaignOfMonth(o.month) === campaignOfMonth(mB) ? campaignOfMonth(mB) : `${campaignOfMonth(o.month)} → <b>${campaignOfMonth(mB)}</b>`;
+    html += `<tr><td class="cat">${escapeHtml(o.eventDisplay)}${sched.name.toLowerCase() !== o.eventDisplay.toLowerCase() ? `<div class="dim" style="font-size:11px;">on the schedule as "${escapeHtml(sched.name)}"</div>` : ''}</td>
+      <td>${catTag(o.category)}</td><td style="color:var(--mut);">${MONTH_NAMES[o.month]}</td>
+      <td style="white-space:nowrap;"><span style="color:var(--ember);font-weight:600;">${MONTH_NAMES[mB]} ${Number(sched.start.slice(8, 10))}</span></td>
+      <td style="white-space:nowrap;">${shift}</td>
+      <td class="r">${fmt$(o.total)}</td><td class="r">${fmtN(o.orders)}</td><td style="color:var(--mut);">${escapeHtml(sched.status || 'dated')}</td></tr>`;
+  }
+  html += `<tr><td colspan="8" style="color:var(--mut);font-size:11.5px;padding-top:10px;">These events counted toward ${yA}'s earlier campaign and are booked on the Show Shift Schedule for a later month in ${yB}, so they will show up in the later campaign instead of being lost. Bookings refresh with every campaign pull${STATE.schedule && STATE.schedule.pulledAt ? ` (schedule read ${STATE.schedule.pulledAt.slice(0, 10)})` : ''}.</td></tr></tbody>`;
+  const tblEl = document.getElementById('evTable');
+  tblEl.innerHTML = html;
+  fixTableOverflow();
 }
 
 // Service events month by month: how many ran and what they made, both seasons.
@@ -4049,7 +4122,11 @@ function renderBridge(primary, bench, primEvs, benchEvs){
   // --- booth shows: name-matched
   const inBooth = e => STATE.bridgeCat === 'booth' ? BOOTH_CATS.has(e.category) : e.category === STATE.bridgeCat;
   const bP = primEvs.filter(inBooth), bB = benchEvs.filter(inBooth);
-  const m = matchEventsByName(bB, bP);
+  const m0b = matchEventsByName(bB, bP);
+  const monthsP = activeMonthsForYear(STATE.byYear[primary] || []);
+  const lastMonthP = monthsP.length ? monthsP[monthsP.length - 1] : 11;
+  const movedB = primary > bench && lastMonthP < 11 ? findMovedLater(m0b.lostOnes, primary, lastMonthP, bP) : new Map();
+  const m = { ...m0b, lostOnes: m0b.lostOnes.filter(o => !movedB.has(o)) };
   const grew = m.matched.filter(x => x.b.total > x.a.total);
   const decl = m.matched.filter(x => x.b.total < x.a.total);
   const boothStart = sum(bB, e => e.total), boothEnd = sum(bP, e => e.total);
@@ -4105,7 +4182,7 @@ function renderBridge(primary, bench, primEvs, benchEvs){
     ['Not worked (yet)', top(m.lostOnes, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total))],
   ];
   html += `<div class="ly-grid4">` + lists.map(([t, items]) => `<div class="ly-list"><div class="ly-list-t">${t}</div>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="dim" style="font-size:12px;margin:0;">None</p>`}</div>`).join('') + `</div>`;
-  html += `<p class="ly-note">Booth shows match across seasons by name (monthly series by name and month), the same way the By Event page matches them. A show that moved to a later month (Prescott Labor Day, Aug 2025 → Sep 2026) sits in "not worked (yet)" until that month is in scope.</p>`;
+  html += `<p class="ly-note">Booth shows match across seasons by name (monthly series by name and month), the same way the By Event page matches them.${movedB.size ? ` ${movedB.size} event${movedB.size === 1 ? '' : 's'} booked for a later month this season (${[...movedB.values()].slice(0, 4).map(x => escapeHtml(x.o.eventDisplay)).join(', ')}${movedB.size > 4 ? '…' : ''}) are left out of "not worked (yet)"; see By Event → Moved later.` : ''}</p>`;
 
   // service events volume
   const avg = (evs) => evs.length ? sum(evs, e => e.total) / evs.length : 0;
