@@ -1273,6 +1273,7 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   </div>
   <div class="seg" id="evSubtabs" role="tablist" aria-label="Event view"></div>
   <div style="height:10px;"></div>
+  <div class="chip-row" id="evCampChips"></div>
   <div class="chip-row" id="evCatChips"></div>
   <div style="height:10px;"></div>
   <div class="search-row">
@@ -3783,15 +3784,37 @@ function renderEvent(){
   yA.innerHTML = yrs.map(y => `<option value="${y}" ${y===STATE.evYearA?'selected':''}>${y}</option>`).join('');
   yB.innerHTML = yrs.map(y => `<option value="${y}" ${y===STATE.evYearB?'selected':''}>${y}</option>`).join('');
 
-  const evsA = STATE.byYear[STATE.evYearA] || [];
-  const evsB = STATE.byYear[STATE.evYearB] || [];
-  const m = matchEventsByName(evsA, evsB);
+  // Campaign filter: I = Jan-Apr, II = May-Aug, III = Sep-Dec
+  STATE.evCampaign = STATE.evCampaign || 'all';
+  const CAMP_MONTHS = { 1: [0, 3], 2: [4, 7], 3: [8, 11] };
+  const inCamp = e => STATE.evCampaign === 'all' || (e.month >= CAMP_MONTHS[STATE.evCampaign][0] && e.month <= CAMP_MONTHS[STATE.evCampaign][1]);
+  const evsA = (STATE.byYear[STATE.evYearA] || []).filter(inCamp);
+  const evsB = (STATE.byYear[STATE.evYearB] || []).filter(inCamp);
+  const m0 = matchEventsByName(evsA, evsB);
+  // Like-for-like: an event from a month the newer season has not reached yet is not
+  // "lost", it just has not happened. Keep those out of "Didn't return".
+  const monthsB = activeMonthsForYear(STATE.byYear[STATE.evYearB] || []);
+  const lastMonthB = monthsB.length ? monthsB[monthsB.length - 1] : 11;
+  const notYet = STATE.evYearB > STATE.evYearA && lastMonthB < 11 ? m0.lostOnes.filter(o => o.month > lastMonthB) : [];
+  const m = { ...m0, lostOnes: m0.lostOnes.filter(o => !notYet.includes(o)) };
 
   const ALLOWED_NEW = new Set(['Elite', 'Key', 'Traditional']);
   const eligibleNew = m.newOnes.filter(o => ALLOWED_NEW.has(o.category));
 
+  const campLbl = STATE.evCampaign === 'all' ? '' : ` • Campaign ${['', 'I', 'II', 'III'][STATE.evCampaign]}`;
   document.getElementById('evMatchSummary').textContent =
-    `${m.matched.length} matched • ${eligibleNew.length} new (Elite/Key/Traditional) in ${STATE.evYearB} • ${m.lostOnes.length} didn't return`;
+    `${m.matched.length} matched • ${eligibleNew.length} new (Elite/Key/Traditional) in ${STATE.evYearB} • ${m.lostOnes.length} didn't return${campLbl}` +
+    (notYet.length ? ` • ${notYet.length} from ${MONTH_NAMES[lastMonthB + 1]}–Dec not reached yet in ${STATE.evYearB}` : '');
+
+  // Campaign chips
+  const campBox = document.getElementById('evCampChips');
+  campBox.innerHTML = `<span class="chip-lbl">Campaign</span>` + [['all', 'All'], ['1', 'Campaign I · Jan–Apr'], ['2', 'Campaign II · May–Aug'], ['3', 'Campaign III · Sep–Dec']].map(([k, l]) =>
+    `<button class="chip ${String(STATE.evCampaign) === k ? 'active' : ''}" data-camp="${k}">${l}</button>`
+  ).join('');
+  campBox.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
+    STATE.evCampaign = b.dataset.camp === 'all' ? 'all' : Number(b.dataset.camp);
+    renderEvent();
+  }));
 
   // Sub-tabs with counts
   const counts = {
