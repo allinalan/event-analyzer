@@ -3788,14 +3788,22 @@ function renderEvent(){
   STATE.evCampaign = STATE.evCampaign || 'all';
   const CAMP_MONTHS = { 1: [0, 3], 2: [4, 7], 3: [8, 11] };
   const inCamp = e => STATE.evCampaign === 'all' || (e.month >= CAMP_MONTHS[STATE.evCampaign][0] && e.month <= CAMP_MONTHS[STATE.evCampaign][1]);
-  const evsA = (STATE.byYear[STATE.evYearA] || []).filter(inCamp);
-  const evsB = (STATE.byYear[STATE.evYearB] || []).filter(inCamp);
-  const m0 = matchEventsByName(evsA, evsB);
+  const allA = (STATE.byYear[STATE.evYearA] || []).filter(inCamp);
+  const allB = (STATE.byYear[STATE.evYearB] || []).filter(inCamp);
   // Like-for-like: an event from a month the newer season has not reached yet is not
   // "lost", it just has not happened. Keep those out of "Didn't return".
   const monthsB = activeMonthsForYear(STATE.byYear[STATE.evYearB] || []);
   const lastMonthB = monthsB.length ? monthsB[monthsB.length - 1] : 11;
-  const notYet = STATE.evYearB > STATE.evYearA && lastMonthB < 11 ? m0.lostOnes.filter(o => o.month > lastMonthB) : [];
+  const partialB = STATE.evYearB > STATE.evYearA && lastMonthB < 11;
+  // Service events run as blitzes whose months and venues move, so they are never
+  // name-matched here. They get a volume comparison instead (the Service Event chip).
+  const isSvc = e => e.category === 'Service Event';
+  const svcA = allA.filter(e => isSvc(e) && (!partialB || e.month <= lastMonthB));
+  const svcB = allB.filter(isSvc);
+  const evsA = allA.filter(e => !isSvc(e));
+  const evsB = allB.filter(e => !isSvc(e));
+  const m0 = matchEventsByName(evsA, evsB);
+  const notYet = partialB ? m0.lostOnes.filter(o => o.month > lastMonthB) : [];
   const m = { ...m0, lostOnes: m0.lostOnes.filter(o => !notYet.includes(o)) };
 
   const ALLOWED_NEW = new Set(['Elite', 'Key', 'Traditional']);
@@ -3804,7 +3812,8 @@ function renderEvent(){
   const campLbl = STATE.evCampaign === 'all' ? '' : ` • Campaign ${['', 'I', 'II', 'III'][STATE.evCampaign]}`;
   document.getElementById('evMatchSummary').textContent =
     `${m.matched.length} matched • ${eligibleNew.length} new (Elite/Key/Traditional) in ${STATE.evYearB} • ${m.lostOnes.length} didn't return${campLbl}` +
-    (notYet.length ? ` • ${notYet.length} from ${MONTH_NAMES[lastMonthB + 1]}–Dec not reached yet in ${STATE.evYearB}` : '');
+    (notYet.length ? ` • ${notYet.length} from ${MONTH_NAMES[lastMonthB + 1]}–Dec not reached yet in ${STATE.evYearB}` : '') +
+    ` • service events ${svcB.length} vs ${svcA.length} (volume, not name-matched)`;
 
   // Campaign chips
   const campBox = document.getElementById('evCampChips');
@@ -3835,8 +3844,8 @@ function renderEvent(){
 
   // Category chips
   const cats = new Set(['all']);
-  for (const ev of evsA) cats.add(ev.category);
-  for (const ev of evsB) cats.add(ev.category);
+  for (const ev of allA) cats.add(ev.category);
+  for (const ev of allB) cats.add(ev.category);
   const chipBox = document.getElementById('evCatChips');
   chipBox.innerHTML = `<span class="chip-lbl">Ranking</span>` + ['all', ...CAT_ORDER.filter(c => cats.has(c))].map(c =>
     `<button class="chip ${STATE.evCatFilter===c?'active':''}" data-cat="${c}">${c==='all'?'All categories':c}</button>`
@@ -3886,6 +3895,11 @@ function renderEvent(){
 
   if (tab === 'grew') rows.sort((x,y) => y.diff - x.diff);
   if (tab === 'declined') rows.sort((x,y) => x.diff - y.diff);
+
+  if (STATE.evCatFilter === 'Service Event') {
+    renderServiceVolume(svcA, svcB, partialB ? lastMonthB : 11);
+    return;
+  }
 
   const maxAbs = rows.reduce((mx,r) => Math.max(mx, Math.abs(r.diff)||0), 0);
   const sortIcon = key => STATE.evSort === key ? '<span class="s-ind">▼</span>' : '<span class="s-ind">▽</span>';
@@ -3941,6 +3955,37 @@ function renderEvent(){
     if (sel) sel.value = STATE.evSort;
     renderEvent();
   }));
+}
+
+// Service events month by month: how many ran and what they made, both seasons.
+function renderServiceVolume(svcA, svcB, lastMonth){
+  const yA = STATE.evYearA, yB = STATE.evYearB;
+  const sum = arr => arr.reduce((a, e) => a + e.total, 0);
+  const avg = arr => (arr.length ? sum(arr) / arr.length : 0);
+  let html = `<thead><tr><th>Month</th><th class="r">${yA} events</th><th class="r">${yB} events</th><th class="r">Δ events</th><th class="r">${yA} CPO</th><th class="r">${yB} CPO</th><th class="r">Δ CPO</th><th class="r">${yA} avg</th><th class="r">${yB} avg</th></tr></thead><tbody>`;
+  const months = [...new Set([...svcA, ...svcB].map(e => e.month))].sort((a, b) => a - b);
+  if (!months.length) html += `<tr><td colspan="9" style="text-align:center;padding:34px 20px;color:var(--mut);">No service events in this scope.</td></tr>`;
+  for (const mo of months) {
+    const a = svcA.filter(e => e.month === mo), b = svcB.filter(e => e.month === mo);
+    const dn = b.length - a.length, dc = sum(b) - sum(a);
+    const reached = mo <= lastMonth;
+    html += `<tr${reached ? '' : ' style="color:var(--faded);"'}><td class="cat">${MONTH_NAMES[mo]}${reached ? '' : ' <span class="dim" style="font-size:10.5px;">not reached yet</span>'}</td>
+      <td class="r">${a.length}</td><td class="r">${reached ? b.length : '<span class="dim">—</span>'}</td>
+      <td class="r ${reached ? deltaClass(dn) : ''}">${reached ? `${deltaArrow(dn)} ${fmtDeltaN(dn)}` : '<span class="dim">—</span>'}</td>
+      <td class="r">${fmt$(sum(a))}</td><td class="r">${reached ? fmt$(sum(b)) : '<span class="dim">—</span>'}</td>
+      <td class="r ${reached ? deltaClass(dc) : ''}">${reached ? `${deltaArrow(dc)} ${fmtDelta$(dc)}` : '<span class="dim">—</span>'}</td>
+      <td class="r">${a.length ? fmt$(avg(a)) : '<span class="dim">—</span>'}</td><td class="r">${reached && b.length ? fmt$(avg(b)) : '<span class="dim">—</span>'}</td></tr>`;
+  }
+  const dn = svcB.length - svcA.length, dc = sum(svcB) - sum(svcA);
+  html += `<tr class="total"><td class="cat">Like-for-like${lastMonth < 11 ? ` (through ${MONTH_NAMES[lastMonth]})` : ''}</td>
+    <td class="r">${svcA.length}</td><td class="r">${svcB.length}</td><td class="r ${deltaClass(dn)}">${deltaArrow(dn)} ${fmtDeltaN(dn)}</td>
+    <td class="r">${fmt$(sum(svcA))}</td><td class="r">${fmt$(sum(svcB))}</td><td class="r ${deltaClass(dc)}">${deltaArrow(dc)} ${fmtDelta$(dc)}</td>
+    <td class="r">${fmt$(avg(svcA))}</td><td class="r">${fmt$(avg(svcB))}</td></tr>`;
+  html += `<tr><td colspan="9" style="color:var(--mut);font-size:11.5px;padding-top:10px;">Service events are blitzes: strings of 6–7 per campaign whose months and venues move, so they are compared by volume, never matched by name. Events with no sales and no orders are excluded.</td></tr>`;
+  html += `</tbody>`;
+  const tblEl = document.getElementById('evTable');
+  tblEl.innerHTML = html;
+  fixTableOverflow();
 }
 
 // ============================================
