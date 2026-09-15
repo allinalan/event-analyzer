@@ -3996,28 +3996,37 @@ function namesAgree(a, b){
 }
 const cityNorm = c => String(c || '').toLowerCase().replace(/,?\s*(az|nm|tx|arizona|new mexico|texas)\.?$/, '').replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
 // lostOnes: matcher groups from the prior season; returns Map group -> { o, sched }
-// Rules (Alan, Sep 2026): a name that repeats within the prior season is a series, not a
-// move; a booking in a different city is a different event, not a move.
+// Rules (Alan, Sep 2026):
+//   - a booking in a different city is a different event, not a move;
+//   - a name that repeats within a season is a series. A series instance counts as moved
+//     only when the newer season is short that many instances in the months it has reached
+//     AND has at least that many later bookings (Flagstaff Art in the Park: 2 in 2025, 1 so
+//     far in 2026, 1 booked for September = moved. Oak Creek: 9 in spring 2025, 1 fall
+//     booking = not a move).
 function findMovedLater(lostOnes, yearB, lastMonthB, reachedB, allA){
   const out = new Map();
   const yearsMap = (STATE.schedule && STATE.schedule.years) || {};
   const sched = yearsMap[yearB] || (STATE.schedule && Number(STATE.schedule.year) === yearB ? STATE.schedule.events : []) || [];
   if (!sched.length) return out;
-  const later = sched.filter(s => Number(s.start.slice(5, 7)) - 1 > lastMonthB).map(s => ({ ...s, n: schedNorm(s.name) }));
+  const later = sched.filter(s => Number(s.start.slice(5, 7)) - 1 > lastMonthB).map(s => ({ ...s, n: schedNorm(s.name) })).sort((a, b) => a.start.localeCompare(b.start));
   if (!later.length) return out;
-  const reachedNorms = new Set(reachedB.map(e => schedNorm(e.eventRaw)));
-  const priorCount = {};
-  for (const e of (allA || [])) { const n = schedNorm(e.eventRaw); priorCount[n] = (priorCount[n] || 0) + 1; }
+  const count = (arr, keyFn) => { const c = {}; for (const e of arr) { const k = keyFn(e); if (k) c[k] = (c[k] || 0) + 1; } return c; };
+  const priorCount = count((allA || []).filter(e => e.month <= lastMonthB), e => schedNorm(e.eventRaw));
+  const reachedCount = count(reachedB, e => schedNorm(e.eventRaw));
   const priorSched = (yearsMap[yearB - 1] || []).map(s => ({ ...s, n: schedNorm(s.name) }));
+  const used = new Set();
   for (const o of lostOnes) {
     const n = schedNorm(o.eventNorm || o.eventDisplay);
-    if (!n || reachedNorms.has(n)) continue;              // the series already ran this season
-    if ((priorCount[n] || 0) > 1) continue;               // repeated within the prior season: a series
-    const hit = later.find(s => namesAgree(n, s.n));
-    if (!hit) continue;
+    if (!n) continue;
+    const missing = (priorCount[n] || 1) - (reachedCount[n] || 0);
+    if (missing <= 0) continue;                              // the series is whole this season
+    const candidates = later.filter(s => !used.has(s) && namesAgree(n, s.n));
+    if (!candidates.length || candidates.length < missing) continue;   // not enough later bookings to call it a move
+    const hit = candidates[0];
     // same name, different city = different event
     const prior = priorSched.find(s => namesAgree(n, s.n) && Number(s.start.slice(5, 7)) - 1 === o.month) || priorSched.find(s => namesAgree(n, s.n));
     if (prior && cityNorm(prior.city) && cityNorm(hit.city) && cityNorm(prior.city) !== cityNorm(hit.city)) continue;
+    used.add(hit);
     out.set(o, { o, sched: hit });
   }
   return out;
