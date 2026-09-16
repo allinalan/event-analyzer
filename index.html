@@ -716,6 +716,15 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
 .cat-tag.c-key{background:var(--surface);color:var(--ink);border-color:var(--ink);font-weight:600;}
 .cat-tag.c-traditional{background:var(--surface);color:var(--ink-2);border-color:var(--line-strong);}
 .cat-tag.c-unknown{background:var(--neg-soft);color:var(--neg);border-color:var(--neg-line);}
+/* Territory tag: a second tag next to the ranking (El Paso Territory = El Paso, TX + New Mexico). */
+.terr-tag{
+  display:inline-flex;align-items:center;
+  padding:1.5px 7px;border-radius:5px;margin-left:4px;
+  font-family:var(--mono);font-size:9px;font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;white-space:nowrap;
+  border:1px solid var(--ember-line);background:var(--ember-soft);color:var(--ember-deep);
+}
+.terr-tag.hand{border-style:dashed;}
 
 /* =====================  CHARTS  ===================== */
 .chart-box{position:relative;}
@@ -1275,6 +1284,7 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   <div style="height:10px;"></div>
   <div class="chip-row" id="evCampChips"></div>
   <div class="chip-row" id="evCatChips"></div>
+  <div class="chip-row" id="evTerrChips" style="display:none;"></div>
   <div style="height:10px;"></div>
   <div class="search-row">
     <input type="text" id="evSearch" placeholder="Search event name…" aria-label="Search event name">
@@ -1297,7 +1307,7 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   <header class="page-head">
     <div class="eyebrow">Layers</div>
     <h1 class="ptitle" id="lyTitle">Layers</h1>
-    <p class="psub" id="lySub">The four layers underneath the season total: what moved it, how hard each shift worked, where the dollars came from, and how much rides on the biggest events.</p>
+    <p class="psub" id="lySub">The five layers underneath the season total: what moved it, how hard each shift worked, where the dollars came from, how much rides on the biggest events, and how each territory is doing.</p>
   </header>
   <div id="lyScopeBar"></div>
   <div class="panel">
@@ -1315,6 +1325,10 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   <div class="panel">
     <div class="phead"><div><span class="ptit2-eyebrow">Concentration</span><div class="ptit2">How much rides on the biggest events <span class="ptit2-sub">— same scope as Auto Insights: Industry, Realtor and team meetings excluded</span></div></div></div>
     <div id="concBody"></div>
+  </div>
+  <div class="panel" id="terrPanel">
+    <div class="phead"><div><span class="ptit2-eyebrow">Territories</span><div class="ptit2" id="terrTitle">Territories <span class="ptit2-sub">— every event keeps its ranking and is also tagged with the territory it ran in</span></div></div></div>
+    <div id="terrBody"></div>
   </div>
 </div>
 
@@ -1362,6 +1376,7 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
     <div id="rerankList"></div>
     <p style="font-size:11.5px;color:var(--mut);margin:14px 0 0;line-height:1.55;">
       <strong style="color:var(--ink);">Heads up:</strong> changes you make here are saved in this browser. If you re-upload the same year later, the spreadsheet values will overwrite these edits — so for permanent changes, also fix the <code>Rank</code> column in your master file.
+      The <strong style="color:var(--ink);">Territory</strong> column is a second tag next to the ranking (El Paso Territory = El Paso, TX and New Mexico): an event keeps its ranking and is also counted in its territory on the Layers page. Tags you set or clear here are marked <em>hand</em> and the campaign refresh never changes them.
     </p>
   </div>
 
@@ -1402,6 +1417,14 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   </details>
 
   <details class="ref-details">
+    <summary>Territories</summary>
+    <div class="ref-body">
+      A territory is a second tag next to the ranking. An event in the <span class="terr-tag" style="margin-left:0;">El Paso</span> territory (El Paso, TX and New Mexico) still counts as Elite, Key, Traditional, Service Event… in every season total; the Layers page adds a panel that reads the same events through the territory tag: how many events, how many were added, CPO, orders and average order, against the benchmark season.
+      The campaign refresh tags events from the place names in their titles (El Paso, Las Cruces, New Mexico, Cielo Vista, Ruidoso, Cloudcroft…) and from prior seasons of the same event; anything it is unsure about is listed in the run report for a ruling. Tags set or cleared by hand in <em>Find &amp; re-rank</em> stay that way.
+    </div>
+  </details>
+
+  <details class="ref-details">
     <summary>How event matching works</summary>
     <div class="ref-body">
       Events are matched across years by their name (the part after the leading ID like <code>00094424 -</code>).
@@ -1433,6 +1456,11 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
 // ============================================
 const STORAGE_KEY = 'cutco_event_dashboard_v2';
 const CAT_ORDER = ['Elite','Key','Traditional','Mesa Marketplace','Service Event','Malls','RLT','Industry','Other','Unknown'];
+// Territories: a second tag next to the ranking (event.territory = id, event.territoryVia =
+// how it got there: name-rule / dictionary / ruling from the campaign refresh, or hand). The
+// published data.json carries the definitions (payload.territories, written from the
+// automation's config.json); this default keeps older files working.
+const DEFAULT_TERRITORIES = [{id:'el-paso', label:'El Paso Territory', short:'El Paso', note:'El Paso, TX and New Mexico'}];
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const CAMPAIGNS = [
@@ -1466,6 +1494,8 @@ const STATE = {
   rerankSearch: '',
   rerankYearFilter: 'all',
   editedEventKeys: new Set(), // tracks which events have been manually re-ranked
+  territories: null,          // territory definitions from data.json (null = DEFAULT_TERRITORIES)
+  evTerritory: 'all',         // By Event territory chip: 'all' | territory id | 'none'
 };
 
 // ============================================
@@ -1940,6 +1970,7 @@ function saveStorage(){
       editedEventKeys: [...STATE.editedEventKeys],
       kpiHiddenYears: [...STATE.kpiHiddenYears],
       schedule: STATE.schedule || null,
+      territories: STATE.territories || null,
       lastUpdated: new Date().toISOString()
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -1958,6 +1989,7 @@ function loadStorage(){
     STATE.editedEventKeys = new Set(obj.editedEventKeys || []);
     STATE.kpiHiddenYears = new Set((obj.kpiHiddenYears || []).map(Number));
     STATE.schedule = obj.schedule || null;
+    STATE.territories = Array.isArray(obj.territories) && obj.territories.length ? obj.territories : null;
     rebuildDerived();
     return STATE.events.length > 0;
   } catch (e) {
@@ -1973,6 +2005,7 @@ function buildPayload(){
     editedEventKeys: [...STATE.editedEventKeys],
     kpiHiddenYears: [...STATE.kpiHiddenYears],
     schedule: STATE.schedule || null,
+    territories: STATE.territories || null,
     lastUpdated: new Date().toISOString()
   };
 }
@@ -2010,6 +2043,7 @@ async function loadPublishedData(hadLocal){
     STATE.editedEventKeys = new Set(obj.editedEventKeys || []);
     STATE.kpiHiddenYears = new Set((obj.kpiHiddenYears || []).map(Number));
     STATE.schedule = obj.schedule || null;
+    STATE.territories = Array.isArray(obj.territories) && obj.territories.length ? obj.territories : null;
     rebuildDerived();
     updateNavChrome();
     setActivePage('overview');
@@ -2552,6 +2586,18 @@ function catTag(cat){
   const c = String(cat || 'Other');
   const cls = c === 'Elite' ? 'c-elite' : c === 'Key' ? 'c-key' : c === 'Traditional' ? 'c-traditional' : c === 'Unknown' ? 'c-unknown' : '';
   return `<span class="cat-tag ${cls}">${escapeHtml(c)}</span>`;
+}
+// Territory tag next to the ranking tag. Dashed border = set by hand (frozen for the automation).
+function territories(){ return (STATE.territories && STATE.territories.length) ? STATE.territories : DEFAULT_TERRITORIES; }
+function terrOf(ev){
+  if (!ev || !ev.territory) return null;
+  return territories().find(t => t.id === ev.territory) || {id: ev.territory, label: ev.territory, short: ev.territory, note: ''};
+}
+function terrTag(ev, full){
+  const t = terrOf(ev);
+  if (!t) return '';
+  const hand = ev.territoryVia === 'hand';
+  return `<span class="terr-tag${hand ? ' hand' : ''}" title="${escapeHtml(t.label)}${hand ? ' (set by hand)' : ''}">${escapeHtml(full ? t.label : t.short)}</span>`;
 }
 
 // Delta chip: arrow + signed absolute + optional pct. Direction is carried by
@@ -3863,6 +3909,26 @@ function renderEvent(){
     renderEvent();
   }));
 
+  // Territory chips (only when some stored event carries a tag)
+  const terrBox = document.getElementById('evTerrChips');
+  const terrs = territories().filter(t => STATE.events.some(e => e.territory === t.id));
+  if (terrs.length) {
+    if (STATE.evTerritory !== 'all' && STATE.evTerritory !== 'none' && !terrs.some(t => t.id === STATE.evTerritory)) STATE.evTerritory = 'all';
+    terrBox.style.display = '';
+    terrBox.innerHTML = `<span class="chip-lbl">Territory</span>` + [['all', 'All'], ...terrs.map(t => [t.id, t.label]), ['none', 'Outside territories']].map(([k, l]) =>
+      `<button class="chip ${STATE.evTerritory===k?'active':''}" data-terr="${escapeHtml(k)}">${escapeHtml(l)}</button>`
+    ).join('');
+    terrBox.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
+      STATE.evTerritory = b.dataset.terr;
+      renderEvent();
+    }));
+  } else {
+    STATE.evTerritory = 'all';
+    terrBox.style.display = 'none'; terrBox.innerHTML = '';
+  }
+  const gEv = g => (g && g.events && g.events[0]) || null;   // the event carrying a group's tags
+  const inTerr = ev => STATE.evTerritory === 'all' || (STATE.evTerritory === 'none' ? !(ev && ev.territory) : !!(ev && ev.territory === STATE.evTerritory));
+
   // Sub-tab data — identical row construction to the original
   const tab = STATE.evSubTab;
   let rows = [];
@@ -3870,6 +3936,7 @@ function renderEvent(){
     rows = m.matched.map(({a,b}) => ({
       name: b.eventDisplay || a.eventDisplay,
       cat: b.category || a.category,
+      tev: gEv(b) || gEv(a),
       month: b.month,
       monthA: a.month,
       vA: a.total, vB: b.total,
@@ -3881,17 +3948,18 @@ function renderEvent(){
     if (tab === 'declined') rows = rows.filter(r => r.diff < 0);
   } else if (tab === 'new') {
     rows = eligibleNew.map(o => ({
-      name: o.eventDisplay, cat: o.category, month: o.month,
+      name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month,
       vA: 0, vB: o.total, oA: 0, oB: o.orders, diff: o.total, pct: null
     }));
   } else if (tab === 'lost') {
     rows = m.lostOnes.map(o => ({
-      name: o.eventDisplay, cat: o.category, month: o.month,
+      name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month,
       vA: o.total, vB: 0, oA: o.orders, oB: 0, diff: -o.total, pct: -1
     }));
   }
 
   if (STATE.evCatFilter !== 'all') rows = rows.filter(r => r.cat === STATE.evCatFilter);
+  if (STATE.evTerritory !== 'all') rows = rows.filter(r => inTerr(r.tev));
   if (STATE.evSearch) {
     const q = STATE.evSearch.toLowerCase();
     rows = rows.filter(r => r.name.toLowerCase().includes(q));
@@ -3911,6 +3979,7 @@ function renderEvent(){
   if (tab === 'moved') {
     let mv = [...moved.values()];
     if (STATE.evCatFilter !== 'all') mv = mv.filter(x => x.o.category === STATE.evCatFilter);
+    if (STATE.evTerritory !== 'all') mv = mv.filter(x => inTerr(gEv(x.o)));
     if (STATE.evSearch) { const q = STATE.evSearch.toLowerCase(); mv = mv.filter(x => x.o.eventDisplay.toLowerCase().includes(q)); }
     renderMovedTable(mv);
     return;
@@ -3944,7 +4013,7 @@ function renderEvent(){
     const dCls = deltaClass(r.diff);
     html += `<tr>
       <td class="cat"><span style="font-family:var(--mono);font-size:9.5px;color:var(--faded);margin-right:8px;">${String(rank).padStart(2,'0')}</span>${escapeHtml(r.name)}</td>
-      <td>${catTag(r.cat)}</td>
+      <td style="white-space:nowrap;">${catTag(r.cat)}${r.tev ? terrTag(r.tev) : ''}</td>
       <td style="color:var(--mut);white-space:nowrap;">${
         r.monthA != null && r.monthA !== r.month
           ? `<span style="color:var(--ember);font-weight:600;" title="Event moved months between years">${MONTH_NAMES[r.monthA]}→${MONTH_NAMES[r.month]}</span>`
@@ -4122,6 +4191,7 @@ function renderLayers(){
   renderShiftProductivity(primary, bench, primEvs, benchEvs);
   renderMoneyMix(primary, bench, primEvs, benchEvs);
   renderConcentration(primary, scope);
+  renderTerritories(primary, bench, primEvs, benchEvs);
 }
 
 // ---- 1. Year-over-year bridge.
@@ -4315,6 +4385,88 @@ function renderMoneyMix(primary, bench, primEvs, benchEvs){
   el.innerHTML = html;
 }
 
+// ---- 5. Territories: the same events read through their territory tag (El Paso Territory =
+// El Paso, TX + New Mexico). Rankings are untouched; this only answers "how is the territory doing".
+function renderTerritories(primary, bench, primEvs, benchEvs){
+  const el = document.getElementById('terrBody');
+  const titleEl = document.getElementById('terrTitle');
+  const terrs = territories().filter(t => STATE.events.some(e => e.territory === t.id));
+  if (terrs.length === 1) titleEl.innerHTML = `${escapeHtml(terrs[0].label)} <span class="ptit2-sub">— ${escapeHtml(terrs[0].note || '')}${terrs[0].note ? '; ' : ''}every event keeps its ranking and is also tagged here</span>`;
+  if (!terrs.length) { el.innerHTML = `<p class="ly-empty">No event carries a territory tag yet. Tags are added by the campaign refresh (its territory name rules) and by hand in Data &amp; Settings → Find &amp; re-rank.</p>`; return; }
+  const sum = (arr, f) => arr.reduce((a, x) => a + f(x), 0);
+  const seasonCpo = sum(primEvs, e => e.total), benchCpo = sum(benchEvs, e => e.total);
+  const tot = evs => ({ n: evs.length, cpo: sum(evs, e => e.total), orders: sum(evs, e => e.orders) });
+  const avgO = x => (x.orders ? x.cpo / x.orders : 0), avgE = x => (x.n ? x.cpo / x.n : 0);
+  const pctOf = (a, b) => (b ? (a - b) / b : null);
+  const sub = (v, vb, fmt) => (bench ? `${bench}: ${fmt(vb)} · ${deltaArrow(v - vb)} ${pctOf(v, vb) != null ? fmtPct(pctOf(v, vb)) : fmtDeltaN(v - vb)}` : '');
+  const CAMPS = [['Campaign I', 0, 3], ['Campaign II', 4, 7], ['Campaign III', 8, 11]];
+  const monthsP = activeMonthsForYear(STATE.byYear[primary] || []);
+  const lastMonthP = monthsP.length ? monthsP[monthsP.length - 1] : 11;
+  let html = '';
+  for (const t of terrs) {
+    const TP = primEvs.filter(e => e.territory === t.id), TB = benchEvs.filter(e => e.territory === t.id);
+    const tP = tot(TP), tB = tot(TB);
+    // added / didn't return: name-matched exactly like the bridge, honoring "moved later"
+    const m0 = matchEventsByName(TB, TP);
+    const moved = bench && primary > bench && lastMonthP < 11 ? findMovedLater(m0.lostOnes, primary, lastMonthP, TP, TB) : new Map();
+    const lost = m0.lostOnes.filter(o => !moved.has(o)), added = m0.newOnes;
+    const grew = m0.matched.filter(x => x.b.total > x.a.total), decl = m0.matched.filter(x => x.b.total < x.a.total);
+    const share = seasonCpo ? tP.cpo / seasonCpo : 0, shareB = benchCpo ? tB.cpo / benchCpo : null;
+    if (terrs.length > 1) html += `<div class="ly-list-t" style="margin-top:22px;">${escapeHtml(t.label)}${t.note ? ` · ${escapeHtml(t.note)}` : ''}</div>`;
+    html += `<p class="ly-head-line">${primary}: <b>${tP.n}</b> ${escapeHtml(t.label)} event${tP.n === 1 ? '' : 's'} in scope, <b>${fmt$(tP.cpo)}</b> CPO (${fmtPct0(share)} of the season)${bench ? `, against ${bench}: ${tB.n} event${tB.n === 1 ? '' : 's'}, ${fmt$(tB.cpo)}${shareB != null ? ` (${fmtPct0(shareB)} of that season)` : ''}` : ''}.</p>`;
+    html += `<div class="ly-kpis">` + [
+      ['Events', fmtN(tP.n), bench ? `${bench}: ${tB.n} · ${deltaArrow(tP.n - tB.n)} ${fmtDeltaN(tP.n - tB.n)}` : ''],
+      ['Added', fmtN(added.length), bench ? `new to the territory vs ${bench} (by name) · ${lost.length} didn't return${moved.size ? ` · ${moved.size} moved later` : ''}` : 'needs a benchmark season'],
+      ['CPO', fmt$(tP.cpo), sub(tP.cpo, tB.cpo, fmt$)],
+      ['Orders', fmtN(tP.orders), sub(tP.orders, tB.orders, fmtN)],
+      ['Average order', fmt$(avgO(tP)), `${bench ? `${bench}: ${fmt$(avgO(tB))} · ` : ''}${fmt$(avgE(tP))} per event`],
+    ].map(([l, v, sb]) => `<div class="kpi-tile"><div class="kpi-lbl">${l}</div><div class="kpi-hero">${v}</div><div class="kpi-sub">${sb}</div></div>`).join('') + `</div>`;
+    // by campaign · by ranking
+    html += `<div class="ly-list-t">By campaign</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Campaign</th>${bench ? `<th class="r">${bench} events</th>` : ''}<th class="r">${primary} events</th>${bench ? `<th class="r">Δ events</th>` : ''}${bench ? `<th class="r">${bench} CPO</th>` : ''}<th class="r">${primary} CPO</th>${bench ? `<th class="r">Δ CPO</th>` : ''}<th class="r">${primary} orders</th><th class="r">Avg order</th><th class="r">Avg / event</th></tr></thead><tbody>`;
+    for (const [lbl, mA, mB] of CAMPS) {
+      const a = TB.filter(e => e.month >= mA && e.month <= mB), b = TP.filter(e => e.month >= mA && e.month <= mB);
+      if (!a.length && !b.length) continue;
+      const ta = tot(a), tb = tot(b);
+      html += `<tr><td class="cat">${lbl}</td>${bench ? `<td class="r">${ta.n}</td>` : ''}<td class="r">${tb.n}</td>${bench ? `<td class="r ${deltaClass(tb.n - ta.n)}">${deltaArrow(tb.n - ta.n)} ${fmtDeltaN(tb.n - ta.n)}</td>` : ''}${bench ? `<td class="r">${fmt$(ta.cpo)}</td>` : ''}<td class="r">${fmt$(tb.cpo)}</td>${bench ? `<td class="r ${deltaClass(tb.cpo - ta.cpo)}">${deltaArrow(tb.cpo - ta.cpo)} ${fmtDelta$(tb.cpo - ta.cpo)}</td>` : ''}<td class="r">${fmtN(tb.orders)}</td><td class="r">${fmt$(avgO(tb))}</td><td class="r">${fmt$(avgE(tb))}</td></tr>`;
+    }
+    html += `<tr class="total"><td class="cat">All in scope</td>${bench ? `<td class="r">${tB.n}</td>` : ''}<td class="r">${tP.n}</td>${bench ? `<td class="r ${deltaClass(tP.n - tB.n)}">${deltaArrow(tP.n - tB.n)} ${fmtDeltaN(tP.n - tB.n)}</td>` : ''}${bench ? `<td class="r">${fmt$(tB.cpo)}</td>` : ''}<td class="r">${fmt$(tP.cpo)}</td>${bench ? `<td class="r ${deltaClass(tP.cpo - tB.cpo)}">${deltaArrow(tP.cpo - tB.cpo)} ${fmtDelta$(tP.cpo - tB.cpo)}</td>` : ''}<td class="r">${fmtN(tP.orders)}</td><td class="r">${fmt$(avgO(tP))}</td><td class="r">${fmt$(avgE(tP))}</td></tr></tbody></table></div>`;
+    html += `<div style="height:18px;"></div><div class="ly-list-t">By ranking</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Ranking</th><th class="r">Events</th><th class="r">CPO</th>${bench ? `<th class="r">${bench} CPO</th><th class="r">Δ</th>` : ''}<th class="r">Orders</th><th class="r">Avg order</th></tr></thead><tbody>`;
+    for (const c of CAT_ORDER) {
+      const b = TP.filter(e => e.category === c), a = TB.filter(e => e.category === c);
+      if (!a.length && !b.length) continue;
+      const tb = tot(b), ta = tot(a);
+      html += `<tr><td class="cat">${c}</td><td class="r">${tb.n}</td><td class="r">${fmt$(tb.cpo)}</td>${bench ? `<td class="r">${fmt$(ta.cpo)}</td><td class="r ${deltaClass(tb.cpo - ta.cpo)}">${deltaArrow(tb.cpo - ta.cpo)} ${fmtDelta$(tb.cpo - ta.cpo)}</td>` : ''}<td class="r">${fmtN(tb.orders)}</td><td class="r">${fmt$(avgO(tb))}</td></tr>`;
+    }
+    html += `</tbody></table></div>`;
+    // added / grew / declined / didn't return
+    if (bench) {
+      const li = (name, cat, v) => `<li><span class="ly-name" title="${escapeHtml(name)}">${escapeHtml(name)} ${lyCatTag(cat)}</span><span class="r ${deltaClass(v)}">${fmtDelta$(v)}</span></li>`;
+      const top = (arr, f) => arr.slice().sort((x, y) => Math.abs(f(y)) - Math.abs(f(x))).slice(0, 8);
+      const lists = [
+        [`Added in ${primary}`, top(added, o => o.total).map(o => li(o.eventDisplay, o.category, o.total))],
+        ['Same events, grew', top(grew, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
+        ['Same events, declined', top(decl, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
+        ["Didn't return (yet)", top(lost, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total))],
+      ];
+      html += `<div class="ly-grid4">` + lists.map(([tt, items]) => `<div class="ly-list"><div class="ly-list-t">${tt}</div>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="dim" style="font-size:12px;margin:0;">None</p>`}</div>`).join('') + `</div>`;
+    }
+    // every tagged event this season
+    const benchBy = {}; for (const e of TB) benchBy[e.eventNorm] = (benchBy[e.eventNorm] || 0) + e.total;
+    const rows = TP.slice().sort((a, b) => a.startDate.localeCompare(b.startDate));
+    html += `<div style="height:22px;"></div><div class="ly-list-t">${escapeHtml(t.label)} events · ${primary}${rows.length ? ` (${rows.length})` : ''}</div>`;
+    if (rows.length) {
+      html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Event</th><th>Ranking</th><th class="r">CPO</th><th class="r">Orders</th><th class="r">Avg order</th>${bench ? `<th class="r">${bench} CPO</th>` : ''}</tr></thead><tbody>`;
+      for (const e of rows) html += `<tr><td style="white-space:nowrap;color:var(--mut);">${e.startDate.slice(0, 10)}</td><td><span class="ly-name" title="${escapeHtml(e.eventDisplay)}">${escapeHtml(e.eventDisplay)}</span>${e.territoryVia === 'hand' ? ' <span class="badge by" title="territory set by hand">hand</span>' : ''}</td><td>${lyCatTag(e.category)}</td><td class="r">${fmt$(e.total)}</td><td class="r">${fmtN(e.orders)}</td><td class="r">${e.orders ? fmt$(e.total / e.orders) : '<span class="dim">—</span>'}</td>${bench ? `<td class="r">${benchBy[e.eventNorm] != null ? fmt$(benchBy[e.eventNorm]) : '<span class="dim">—</span>'}</td>` : ''}</tr>`;
+      html += `</tbody></table></div>`;
+    } else {
+      html += `<p class="ly-empty">No ${escapeHtml(t.label)} events in scope for ${primary}.</p>`;
+    }
+    const dnr = STATE.events.filter(e => e.territory === t.id && didNotRun(e) && e.year === primary);
+    html += `<p class="ly-note">Every event keeps its ranking and is counted in the season totals as usual; this panel is the same events read through the territory tag. Tags come from the campaign refresh's territory name rules and can be set or removed by hand in Data &amp; Settings → Find &amp; re-rank.${dnr.length ? ` ${dnr.length} tagged ${primary} event${dnr.length === 1 ? '' : 's'} with $0 and no orders (${dnr.slice(0, 3).map(e => escapeHtml(e.eventDisplay)).join(', ')}${dnr.length > 3 ? '…' : ''}) are left out as "did not run".` : ''}</p>`;
+  }
+  el.innerHTML = html;
+}
+
 // ---- 4. Concentration: how much of the season rides on the biggest events
 function renderConcentration(primary, scope){
   const el = document.getElementById('concBody');
@@ -4357,7 +4509,7 @@ function renderDidNotRun(){
   if (!list.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = '';
   el.innerHTML = `<div class="phead"><div><span class="ptit2-eyebrow">Excluded from every total</span><div class="ptit2">Did not run <span class="ptit2-sub">— ${list.length} event${list.length === 1 ? '' : 's'} with no sales and no orders in ${yrs.join(' / ')}</span></div></div></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Event</th><th>Year</th><th>Month</th><th>Ranking</th></tr></thead><tbody>${list.map(e => `<tr><td>${escapeHtml(e.eventDisplay)}</td><td>${e.year}</td><td style="color:var(--mut);">${MONTH_NAMES[e.month]}</td><td>${lyCatTag(e.category)}</td></tr>`).join('')}</tbody></table></div>`;
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Event</th><th>Year</th><th>Month</th><th>Ranking</th></tr></thead><tbody>${list.map(e => `<tr><td>${escapeHtml(e.eventDisplay)}</td><td>${e.year}</td><td style="color:var(--mut);">${MONTH_NAMES[e.month]}</td><td style="white-space:nowrap;">${lyCatTag(e.category)}${terrTag(e)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderRerankPanel(){
@@ -4373,10 +4525,14 @@ function renderRerankPanel(){
   const unknownCount = STATE.events.filter(e => e.category === 'Unknown').length;
   const autoCount = STATE.events.filter(e => e.autoAssigned).length;
   const editCount = STATE.editedEventKeys.size;
+  const terrCounts = territories().map(t => [t, STATE.events.filter(e => e.territory === t.id).length]).filter(([, n]) => n > 0);
+  const terrHand = STATE.events.filter(e => e.territoryVia === 'hand').length;
   const parts = [];
   if (unknownCount > 0) parts.push(`${unknownCount} unknown`);
   if (autoCount > 0) parts.push(`${autoCount} auto-assigned`);
   if (editCount > 0) parts.push(`${editCount} hand-edited`);
+  for (const [t, n] of terrCounts) parts.push(`${n} ${t.short}`);
+  if (terrHand > 0) parts.push(`${terrHand} territory by hand`);
   cntEl.textContent = parts.join(' · ');
 
   if (!STATE.rerankQuickFilter) STATE.rerankQuickFilter = 'all';
@@ -4385,7 +4541,8 @@ function renderRerankPanel(){
     quickEl.innerHTML =
       `<button class="chip ${STATE.rerankQuickFilter==='all'?'active':''}" data-quick="all">All events</button>` +
       (unknownCount > 0 ? `<button class="chip ${STATE.rerankQuickFilter==='unknown'?'active':''}" data-quick="unknown">Unknown only (${unknownCount})</button>` : '') +
-      (autoCount > 0 ? `<button class="chip ${STATE.rerankQuickFilter==='auto'?'active':''}" data-quick="auto">Auto-assigned (${autoCount})</button>` : '');
+      (autoCount > 0 ? `<button class="chip ${STATE.rerankQuickFilter==='auto'?'active':''}" data-quick="auto">Auto-assigned (${autoCount})</button>` : '') +
+      terrCounts.map(([t, n]) => `<button class="chip ${STATE.rerankQuickFilter==='terr:'+t.id?'active':''}" data-quick="terr:${escapeHtml(t.id)}">${escapeHtml(t.label)} (${n})</button>`).join('');
     quickEl.querySelectorAll('[data-quick]').forEach(b => b.addEventListener('click', () => {
       STATE.rerankQuickFilter = b.dataset.quick;
       renderRerankPanel();
@@ -4401,6 +4558,9 @@ function renderRerankPanel(){
     pool = pool.filter(e => e.category === 'Unknown');
   } else if (STATE.rerankQuickFilter === 'auto') {
     pool = pool.filter(e => e.autoAssigned);
+  } else if (String(STATE.rerankQuickFilter).startsWith('terr:')) {
+    const tid = STATE.rerankQuickFilter.slice(5);
+    pool = pool.filter(e => e.territory === tid);
   }
   if (q) {
     pool = pool.filter(e => (e.eventDisplay || '').toLowerCase().includes(q));
@@ -4426,7 +4586,7 @@ function renderRerankPanel(){
   }
 
   let html = `<div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>Event</th><th>Year</th><th>Month</th><th class="r">CPO</th><th>Ranking</th></tr></thead><tbody>`;
+    <thead><tr><th>Event</th><th>Year</th><th>Month</th><th class="r">CPO</th><th>Ranking</th><th>Territory</th></tr></thead><tbody>`;
   for (const ev of capped) {
     const key = eventKey(ev);
     const edited = STATE.editedEventKeys.has(key);
@@ -4436,12 +4596,15 @@ function renderRerankPanel(){
     else if (ev.autoAssigned) badges += ` <span class="badge bb" style="margin-left:6px;">auto · ${ev.autoAssigned}</span>`;
     if (edited) badges += ` <span class="badge by" style="margin-left:6px;">edited</span>`;
     if (didNotRun(ev)) badges += ` <span class="badge" style="margin-left:6px;">did not run · excluded</span>`;
+    if (ev.territory) badges += ` ${terrTag(ev)}`;
+    const topts = `<option value="" ${!ev.territory?'selected':''}>—</option>` + territories().map(t => `<option value="${escapeHtml(t.id)}" ${ev.territory===t.id?'selected':''}>${escapeHtml(t.label)}</option>`).join('');
     html += `<tr>
       <td>${escapeHtml(ev.eventDisplay)}${badges}</td>
       <td class="num">${ev.year}</td>
       <td style="color:var(--mut);">${MONTH_NAMES[ev.month]}</td>
       <td class="r">${fmt$(ev.total)}</td>
       <td><select class="rerank-select sel-inline" data-evkey="${escapeHtml(key)}">${opts}</select></td>
+      <td><select class="terr-select sel-inline" data-evkey="${escapeHtml(key)}" aria-label="Territory">${topts}</select>${ev.territoryVia === 'hand' ? ' <span class="badge by" style="margin-left:6px;" title="set by hand; the campaign refresh will not change it">hand</span>' : ''}</td>
     </tr>`;
   }
   html += `</tbody></table></div>`;
@@ -4463,6 +4626,23 @@ function renderRerankPanel(){
       saveStorage();
       rebuildDerived();
       showToast(`${ev.eventDisplay} — ${oldCat} → ${newCat}`, 'success');
+      renderRerankPanel();
+    });
+  });
+  // Territory toggle: a hand-set tag (or a hand-removed one) is frozen for the automation
+  // (territoryVia = hand). The ranking and the edit markers are untouched.
+  listEl.querySelectorAll('.terr-select').forEach(sel => {
+    sel.addEventListener('change', e => {
+      const targetKey = e.target.dataset.evkey;
+      const ev = STATE.events.find(x => eventKey(x) === targetKey);
+      if (!ev) { showToast('Event not found — try refreshing.', 'error'); return; }
+      const before = terrOf(ev);
+      ev.territory = e.target.value || null;
+      ev.territoryVia = 'hand';
+      const after = terrOf(ev);
+      saveStorage();
+      rebuildDerived();
+      showToast(`${ev.eventDisplay} — territory ${before ? before.label : 'none'} → ${after ? after.label : 'none'}`, 'success');
       renderRerankPanel();
     });
   });
