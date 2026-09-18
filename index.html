@@ -1533,6 +1533,32 @@ function displayEventName(raw){
   return s;
 }
 
+// ---- Event-name search (By Event and Find & re-rank)
+// The same show is spelled differently from season to season ("Febalcasa
+// Scottsdale Service & Sales Event" one year, "Scottsdale Service & Sales Event
+// (Febalcasa)" the next), so a plain substring test on the name finds one
+// spelling and hides the rest. Strip everything but letters and digits and
+// require each word of the query somewhere in the name, in any order, so any
+// spelling of the query finds every spelling of the event.
+function searchNorm(s){
+  return String(s || '').toLowerCase()
+    .replace(/&/g, ' and ')            // "Home & Garden" is also typed "Home and Garden"
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function searchTokens(q){
+  const n = searchNorm(q);
+  return n ? n.split(' ') : [];
+}
+function nameMatchesSearch(name, tokens){
+  if (!tokens.length) return true;
+  const hay = searchNorm(name);
+  return tokens.every(t => hay.includes(t));
+}
+// eventRaw rides along so the leading sheet code ("00094424 - ") is findable.
+function eventMatchesSearch(ev, tokens){
+  return nameMatchesSearch(`${(ev && ev.eventDisplay) || ''} ${(ev && ev.eventRaw) || ''}`, tokens);
+}
+
 // ============================================
 // AUTO-CATEGORIZATION (fuzzy match against trained data)
 // ============================================
@@ -3967,8 +3993,8 @@ function renderEvent(){
   if (STATE.evCatFilter !== 'all') rows = rows.filter(r => r.cat === STATE.evCatFilter);
   if (STATE.evTerritory !== 'all') rows = rows.filter(r => inTerr(r.tev));
   if (STATE.evSearch) {
-    const q = STATE.evSearch.toLowerCase();
-    rows = rows.filter(r => r.name.toLowerCase().includes(q));
+    const qTokens = searchTokens(STATE.evSearch);
+    rows = rows.filter(r => nameMatchesSearch(`${r.name} ${(r.tev && r.tev.eventRaw) || ''}`, qTokens));
   }
   if (STATE.evSort === 'diff_desc') rows.sort((x,y) => Math.abs(y.diff) - Math.abs(x.diff));
   else if (STATE.evSort === 'diff_pct') rows.sort((x,y) => Math.abs(y.pct||0) - Math.abs(x.pct||0));
@@ -3986,7 +4012,7 @@ function renderEvent(){
     let mv = [...moved.values()];
     if (STATE.evCatFilter !== 'all') mv = mv.filter(x => x.o.category === STATE.evCatFilter);
     if (STATE.evTerritory !== 'all') mv = mv.filter(x => inTerr(gEv(x.o)));
-    if (STATE.evSearch) { const q = STATE.evSearch.toLowerCase(); mv = mv.filter(x => x.o.eventDisplay.toLowerCase().includes(q)); }
+    if (STATE.evSearch) { const qTokens = searchTokens(STATE.evSearch); mv = mv.filter(x => eventMatchesSearch(x.o, qTokens)); }
     renderMovedTable(mv);
     return;
   }
@@ -4516,28 +4542,6 @@ function renderDidNotRun(){
   el.style.display = '';
   el.innerHTML = `<div class="phead"><div><span class="ptit2-eyebrow">Excluded from every total</span><div class="ptit2">Did not run <span class="ptit2-sub">— ${list.length} event${list.length === 1 ? '' : 's'} with no sales and no orders in ${yrs.join(' / ')}</span></div></div></div>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Event</th><th>Year</th><th>Month</th><th>Ranking</th></tr></thead><tbody>${list.map(e => `<tr><td>${escapeHtml(e.eventDisplay)}</td><td>${e.year}</td><td style="color:var(--mut);">${MONTH_NAMES[e.month]}</td><td style="white-space:nowrap;">${lyCatTag(e.category)}${terrTag(e)}</td></tr>`).join('')}</tbody></table></div>`;
-}
-
-// The same show is spelled differently from season to season ("Febalcasa
-// Scottsdale Service & Sales Event" one year, "Scottsdale Service & Sales Event
-// (Febalcasa)" the next), so a plain substring test on the display name finds
-// one spelling and hides the rest. Strip everything but letters and digits and
-// require each word of the query somewhere in the name, in any order, so any
-// spelling of the query finds every spelling of the event. eventRaw is searched
-// too, which makes the leading sheet code ("00094424 - ") findable.
-function searchNorm(s){
-  return String(s || '').toLowerCase()
-    .replace(/&/g, ' and ')            // "Home & Garden" is also typed "Home and Garden"
-    .replace(/[^a-z0-9]+/g, ' ').trim();
-}
-function searchTokens(q){
-  const n = searchNorm(q);
-  return n ? n.split(' ') : [];
-}
-function eventMatchesSearch(ev, tokens){
-  if (!tokens.length) return true;
-  const hay = searchNorm(`${ev.eventDisplay || ''} ${ev.eventRaw || ''}`);
-  return tokens.every(t => hay.includes(t));
 }
 
 function renderRerankPanel(){
