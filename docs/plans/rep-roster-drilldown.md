@@ -117,9 +117,15 @@ nulled. The UI reads `level` and renders the dollar columns as `—` when they a
 
 ### 4.1 Don't click 387 times
 
-The modal is ExtJS, like the rest of VectorConnect. Open DevTools → Network, click the blue person
-icon once, and capture the request it fires. It will carry the event id (`00081320`). Then loop that
-request over every event id in the Event Sales grid store rather than driving the UI.
+The modal is ExtJS, like the rest of VectorConnect. Open DevTools → Network, filter to **Fetch/XHR**,
+clear the list, click the blue person icon once, and capture the request it fires. It will carry the
+event id (`00081320`). Then loop that request over every event id in the Event Sales grid store
+rather than driving the UI.
+
+**Capture the URL, method, payload and response shape — nothing else.** Do not use *Copy as cURL*
+and do not copy the Request Headers block: both embed the live session cookie, and the script does
+not need them (it runs inside the authenticated browser and inherits the session). This applies to
+anyone running the pull, buyers included.
 
 Fallbacks, in order of preference:
 1. The captured endpoint, looped over event ids — one small call per event, fast and unattended.
