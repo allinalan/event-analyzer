@@ -643,6 +643,10 @@ nav.topnav{
 }
 .tbl tr:last-child td{border-bottom:none;}
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+/* A scrolling wrapper becomes the scrollport for the sticky header, so the
+   page's topbar offset would pin the header inside the table, floating it over
+   the first rows. Inside such a wrapper the header pins at its natural spot. */
+.tbl-wrap.is-scrollx .tbl th{top:0;}
 .dim{color:var(--faded);}
 
 /* Delta cells: colored text + arrow, no cell floods */
@@ -2724,7 +2728,9 @@ function renderMonthlyChart(containerId, legendId, series, fmtFn){
 function fixTableOverflow(){
   document.querySelectorAll('.tbl-wrap').forEach(w => {
     w.style.overflow = 'visible';
-    if (w.scrollWidth > w.clientWidth + 1) w.style.overflow = 'auto';
+    const scrolls = w.scrollWidth > w.clientWidth + 1;
+    if (scrolls) w.style.overflow = 'auto';
+    w.classList.toggle('is-scrollx', scrolls);
   });
 }
 
@@ -4512,6 +4518,28 @@ function renderDidNotRun(){
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Event</th><th>Year</th><th>Month</th><th>Ranking</th></tr></thead><tbody>${list.map(e => `<tr><td>${escapeHtml(e.eventDisplay)}</td><td>${e.year}</td><td style="color:var(--mut);">${MONTH_NAMES[e.month]}</td><td style="white-space:nowrap;">${lyCatTag(e.category)}${terrTag(e)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
+// The same show is spelled differently from season to season ("Febalcasa
+// Scottsdale Service & Sales Event" one year, "Scottsdale Service & Sales Event
+// (Febalcasa)" the next), so a plain substring test on the display name finds
+// one spelling and hides the rest. Strip everything but letters and digits and
+// require each word of the query somewhere in the name, in any order, so any
+// spelling of the query finds every spelling of the event. eventRaw is searched
+// too, which makes the leading sheet code ("00094424 - ") findable.
+function searchNorm(s){
+  return String(s || '').toLowerCase()
+    .replace(/&/g, ' and ')            // "Home & Garden" is also typed "Home and Garden"
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function searchTokens(q){
+  const n = searchNorm(q);
+  return n ? n.split(' ') : [];
+}
+function eventMatchesSearch(ev, tokens){
+  if (!tokens.length) return true;
+  const hay = searchNorm(`${ev.eventDisplay || ''} ${ev.eventRaw || ''}`);
+  return tokens.every(t => hay.includes(t));
+}
+
 function renderRerankPanel(){
   const listEl = document.getElementById('rerankList');
   const yrSel = document.getElementById('rerankYearFilter');
@@ -4549,7 +4577,7 @@ function renderRerankPanel(){
     }));
   }
 
-  const q = (STATE.rerankSearch || '').trim().toLowerCase();
+  const qTokens = searchTokens(STATE.rerankSearch);
   let pool = STATE.events.slice();
   if (STATE.rerankYearFilter !== 'all') {
     pool = pool.filter(e => e.year === Number(STATE.rerankYearFilter));
@@ -4562,11 +4590,11 @@ function renderRerankPanel(){
     const tid = STATE.rerankQuickFilter.slice(5);
     pool = pool.filter(e => e.territory === tid);
   }
-  if (q) {
-    pool = pool.filter(e => (e.eventDisplay || '').toLowerCase().includes(q));
+  if (qTokens.length) {
+    pool = pool.filter(e => eventMatchesSearch(e, qTokens));
   }
 
-  if (!q && STATE.rerankYearFilter === 'all' && STATE.rerankQuickFilter === 'all') {
+  if (!qTokens.length && STATE.rerankYearFilter === 'all' && STATE.rerankQuickFilter === 'all') {
     listEl.innerHTML = `<p style="color:var(--mut);font-size:12.5px;margin:0;">Type an event name above, pick a year, or use a quick filter to find events to re-rank.</p>`;
     return;
   }
@@ -4646,6 +4674,10 @@ function renderRerankPanel(){
       renderRerankPanel();
     });
   });
+
+  // This panel re-renders on every keystroke with a brand-new wrapper, so the
+  // overflow decision has to be re-made here too, not just on the page render.
+  fixTableOverflow();
 }
 
 function renderSettings(){
