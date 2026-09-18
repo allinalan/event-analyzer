@@ -71,34 +71,45 @@ schedule never had it — and VC hands over seven named reps with dollars attach
 
 ---
 
-## 3. Data model — the `roster` field
+## 3. Data model — the roster entry
+
+One entry per rep who wrote an order at the event, at `level: "full"`:
 
 ```json
 {
-  "eventRaw": "00081320 - Maricopa County Home & Garden Show",
-  "total": 87061,
-  "orders": 102,
-  "roster": [
-    {
-      "rep": "Adam Conroy",   // full name, from VectorConnect
-      "cpo": 6626,
-      "orders": 14,
-      "avg": 473,
-      "shifts": null,         // Phase C overlay; null = not on the shift schedule
-      "days": null,           // Phase C overlay
-      "scheduled": null       // Phase C overlay: true/false once the sheet is parsed
-    }
-  ],
-  "rosterPulledAt": "2026-09-18T00:00:00.000Z",
-  "rosterTieOut": true        // rep rows summed to `total` and `orders`
+  "rep": "Adam Conroy",   // full name, from VectorConnect
+  "cpo": 6626,
+  "orders": 14,
+  "avg": 473,
+  "shifts": null,         // Phase C overlay; null = not on the shift schedule
+  "days": null,           // Phase C overlay
+  "scheduled": null       // Phase C overlay: true/false once the sheet is parsed
 }
 ```
 
-`rosterTieOut` is the cheap integrity flag — set it per event at parse time. A `false` means VC's
-own numbers disagreed with each other and the row needs eyes, not that the join is wrong.
+Per event, alongside its entries: `tieOut` — the cheap integrity flag, set at parse time when the
+rep rows summed to the event's stored `total` and `orders`. A `false` means VC's own numbers
+disagreed with each other and the row needs eyes; it does not mean the join is wrong.
 
-**Size:** 387 events × ~6 reps ≈ 2,300 entries, well under 200 KB on a 622 KB `data.json`. Inline is
-fine. If it ever bites, split to a lazy-loaded `roster.json` keyed on `eventRaw`.
+**Where it lives:** a separate `roster.json`, keyed on `eventRaw`, lazy-loaded when a row first
+expands — **not** inline in `data.json`. The first draft had it inline; §8 moves it out, because a
+separate file is what lets the published artifact carry names without dollars, or nothing at all.
+Size is incidental (387 events × ~6 reps ≈ 2,300 entries, under 200 KB) — the split is about
+exposure control, not bytes.
+
+```json
+// roster.json
+{
+  "level": "names",                 // off | names | full — what this file was built at
+  "pulledAt": "2026-09-18T00:00:00.000Z",
+  "events": {
+    "00081320 - Maricopa County Home & Garden Show": [ /* entries as above */ ]
+  }
+}
+```
+
+At `level: "names"` the `cpo`, `orders` and `avg` keys are **omitted entirely**, not zeroed or
+nulled. The UI reads `level` and renders the dollar columns as `—` when they are absent.
 
 ---
 
@@ -259,27 +270,98 @@ will lose an afternoon reconciling numbers that were never meant to match.
 | ~~0~~ | ~~Details probe~~ | — | **Done — Summary by Rep confirmed** |
 | 1 | Capture the modal's network request | Chrome, Mac | 2 |
 | 2 | Loop it over event ids, per campaign; tie out each event | Mac | 3 |
-| 3 | Write `roster` into `data.json` for 2025 + 2026 | Mac | 4 |
+| 3 | Emit `roster.json` for 2025 + 2026 at the configured level (§8) | Mac | 4 |
 | 4 | Drill-down UI, shift columns dashed | repo | 5 |
-| 5 | Ship: commit `data.json` + `index.html`, push | repo | — |
+| 5 | Ship: commit `index.html` (+ `roster.json` if level ≠ `off`), push | repo | — |
 | 6 | Backfill 2023 + 2024 (same script, wider window) | Mac | — |
 | 7 | Phase C overlay: shifts, CPO/shift, scheduled-but-sold-nothing | Mac | — |
 
 **Steps 1–5 deliver the feature as asked.** Everything after is upside.
 
+Set the exposure level (§8) before step 3 — it decides what step 3 writes. `off` is the default and
+still gives the owner the full roster locally.
+
 ---
 
-## 8. Decide before step 5
+## 8. Exposure model — decided, and built for resale
 
-**Do reps see each other's numbers?** This is now the live question, not a footnote. The published
-`data.json` is readable by anyone with the site URL, and step 3 puts every rep's per-event CPO and
-order count into it. Adam Conroy's $473 average sitting next to Matt Foss's $1,260 at the same show
-is a different thing to publish than a team total. Options: publish as-is; publish rosters only to a
-gated build; show names to everyone but dollars only to the owner; or aggregate below a threshold.
-**Pick one before pushing, not after** — this is far easier to not-publish than to un-publish.
+The roster puts every rep's per-event CPO and order count into a file served from a public URL.
+This section is a build requirement, not a footnote.
 
-**The other four Details icons.** One click each, sometime. Cheap to check, and one may be
-items-sold detail worth having.
+### 8.1 Client-side gating is not gating
 
-**2023/2024 now nearly free.** The original reason to skip them was shift-schedule coverage. VC
-covers them at 89% and 84%. Say the word and step 6 folds them in.
+"Render names to everyone, dollars only to the owner" was in the first draft of this plan and is
+**wrong**. On static hosting, if the dollars are in the published JSON then `curl` returns them
+whatever the interface draws. A client-side role check is a curtain, not a wall. Do not ship it and
+do not describe it to a buyer as privacy.
+
+### 8.2 Split the file, gate at build time
+
+| File | Contents | Published |
+|---|---|---|
+| `data.json` | events + totals (as today) | always |
+| `roster.json` | per-rep names, orders, CPO, keyed on `eventRaw` | only at the configured level |
+
+One config value, read by the **pull script**, never by the browser:
+
+| Level | Emits | Use |
+|---|---|---|
+| **`off`** | no `roster.json` | **ship default** |
+| `names` | names + shifts; **dollar fields never written** | team transparency, low risk |
+| `full` | names + dollars | owner-only, or behind real auth |
+
+At `names` the dollars are physically absent from the artifact — there is nothing to curl. That is
+the difference between this and 8.1.
+
+The owner keeps full detail locally regardless: the app already holds the owner's working data in
+`localStorage` and publishes a separate `data.json` for reps (`index.html:2098`, `2113`). The roster
+extends that existing split rather than inventing a new one.
+
+**Default to `off`.** A default is the decision most buyers never revisit.
+
+### 8.3 If a buyer wants the full roster visible to their team
+
+That needs server-side auth, not a flag. Put the site behind something like Cloudflare Access
+(free tier for small teams — verify current limits) rather than writing a backend. Document it as
+the upgrade path so there is an answer ready instead of one invented during a sale.
+
+---
+
+## 9. Selling this to other coordinators
+
+### 9.1 The buyer runs their own pull
+
+Every coordinator has their own VectorConnect login and their own division. There is no version
+where the seller pulls data for customers — that means holding other teams' sales data under their
+credentials, and owning every support call and every breach.
+
+The product is therefore a **template repo + pull script + setup guide**, run by the buyer against
+their own session.
+
+Lead with this. "Your data lives on your machine, in your repo, on your site — I never see it" is a
+stronger answer than "trust my server", and it is the only architecture that works anyway. It also
+means zero multi-tenancy: no shared store, no tenant isolation, no per-customer infrastructure. A
+sale is a repo clone and a config file.
+
+### 9.2 What must become a parameter
+
+- `<title>` (`index.html:6`) and the `.brand-team` span (`1117`) — the only hardcoded "Rising Sun"
+- **Division `75`** — currently baked into the VC skills
+- The **cross-division rep list** in `vectorconnect-team-sales-export` — team-specific, cannot ship
+- Any **name alias file** — per-tenant by definition; generated during the buyer's setup, never bundled
+
+### 9.3 Open question to resolve upstream
+
+Publishing rep-level sales data to a public URL is one coordinator's own call. A package that leads
+twenty coordinators to do it is a different risk profile, and Vector/Cutco corporate may have a
+position. Worth asking rather than assuming — `off` as the shipped default means the answer does not
+block the build either way.
+
+---
+
+## 10. Still open
+
+- **The other four Details icons.** Green `$`, orange flag, red calendar, red tag. One click each,
+  sometime — one may be items-sold detail worth having.
+- **2023/2024 backfill.** The original reason to skip them was shift-schedule coverage. VC covers
+  them at 89% and 84%, so they are now a longer script run rather than extra work.
