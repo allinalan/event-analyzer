@@ -1090,6 +1090,7 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
 .ly-list li .r{white-space:nowrap;font-weight:600;font-family:var(--mono);font-size:11.5px;}
 .ly-list li .delta-up{color:var(--pos);} .ly-list li .delta-dn{color:var(--neg);}
 .ly-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ly-tag{flex:none;white-space:nowrap;}
 .ly-note,.ly-empty{font-size:12px;color:var(--mut);margin:12px 0 0;line-height:1.5;}
 .ly-head-line{font-size:13.5px;color:var(--ink-2);margin:0 0 14px;line-height:1.55;}
 .mix{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--surface-3);min-width:120px;}
@@ -1918,26 +1919,34 @@ function totalsFor(events){
   return {cpo, orders, count, avg: orders ? cpo/orders : 0};
 }
 
-function matchEventsByName(eventsA, eventsB){
-  // Count occurrences per event name within each year. This lets us choose
-  // a smart matching key:
-  //   - If a name occurs at most once in BOTH years → match by name only,
-  //     so a single annual event that shifts months (e.g. Feb→Mar) still matches.
-  //   - If a name occurs multiple times in either year → match by name+month
-  //     to keep the multiple instances as separate entities.
-  const countByName = (arr) => {
-    const c = {};
-    for (const ev of arr) c[ev.eventNorm] = (c[ev.eventNorm] || 0) + 1;
-    return c;
-  };
-  const cntA = countByName(eventsA);
-  const cntB = countByName(eventsB);
-  const useNameOnly = (norm) => (cntA[norm] || 0) <= 1 && (cntB[norm] || 0) <= 1;
+// How far a show may slide between seasons and still be the same running.
+// One or two months is the usual drift (Maricopa moved May→Apr and Oct→Sep in
+// the same year); a jump of a whole season is a different date, not a move.
+const MONTH_DRIFT = 2;
 
-  const groupBy = arr => {
+// Match one season's events against another's, by name.
+//
+// A name's entries within a season are grouped by month first, so two rows for
+// the same show in the same month count as one running.
+//
+// Then the runnings are paired up:
+//   - One each side is unambiguous, so it pairs whatever the months are. An
+//     annual show that slides (Feb→Mar) still matches, as it always has.
+//   - Several on either side means the month is what tells them apart, so pair
+//     the closest months first, and only within MONTH_DRIFT of each other.
+//     Pairing on the exact month instead used to split a show that drifted into
+//     "new" AND "not worked" at once: El Paso Home & Garden ran Feb in 2025 and
+//     Mar + Aug in 2026, and was counted as two new events and one lost.
+//
+// Whatever is left unpaired is genuinely added (in B) or not worked (in A) --
+// except that a leftover whose name did run in the other season is an extra or
+// dropped DATE for a show that still runs, not a new or lost show. That is
+// flagged so callers can say so rather than calling it new.
+function matchEventsByName(eventsA, eventsB){
+  const groupByMonth = arr => {
     const out = {};
     for (const ev of arr){
-      const key = useNameOnly(ev.eventNorm) ? ev.eventNorm : (ev.eventNorm + '|' + ev.month);
+      const key = ev.eventNorm + '|' + ev.month;
       if (!out[key]) {
         out[key] = {
           key, events:[ev], total:ev.total, orders:ev.orders,
@@ -1950,15 +1959,42 @@ function matchEventsByName(eventsA, eventsB){
         out[key].orders += ev.orders;
       }
     }
+    return Object.values(out);
+  };
+  const byName = groups => {
+    const out = {};
+    for (const g of groups) (out[g.eventNorm] = out[g.eventNorm] || []).push(g);
     return out;
   };
-  const ga = groupBy(eventsA), gb = groupBy(eventsB);
+  const na = byName(groupByMonth(eventsA)), nb = byName(groupByMonth(eventsB));
+
   const matched = [], onlyB = [], onlyA = [];
-  for (const k in gb) {
-    if (ga[k]) matched.push({key:k, a:ga[k], b:gb[k]});
-    else onlyB.push(gb[k]);
+  for (const name of new Set([...Object.keys(na), ...Object.keys(nb)])) {
+    const A = na[name] || [], B = nb[name] || [];
+    if (A.length === 1 && B.length === 1) {
+      matched.push({key:name, a:A[0], b:B[0], monthShift:Math.abs(A[0].month - B[0].month)});
+      continue;
+    }
+    // Closest months first; a greedy pass is enough at this size and with the
+    // drift capped, and it keeps the pairing stable and explainable.
+    const cand = [];
+    for (let i = 0; i < A.length; i++) for (let j = 0; j < B.length; j++) {
+      const d = Math.abs(A[i].month - B[j].month);
+      if (d <= MONTH_DRIFT) cand.push({i, j, d});
+    }
+    cand.sort((x, y) => x.d - y.d || x.i - y.i || x.j - y.j);
+    const usedA = new Set(), usedB = new Set();
+    for (const c of cand) {
+      if (usedA.has(c.i) || usedB.has(c.j)) continue;
+      usedA.add(c.i); usedB.add(c.j);
+      matched.push({key:name + '|' + A[c.i].month + '>' + B[c.j].month, a:A[c.i], b:B[c.j], monthShift:c.d});
+    }
+    // A leftover on one side while the other side also ran this show is an
+    // added / dropped date, not a new / lost event.
+    const bothRan = A.length > 0 && B.length > 0;
+    A.forEach((g, i) => { if (!usedA.has(i)) onlyA.push(bothRan ? {...g, droppedDate:true} : g); });
+    B.forEach((g, j) => { if (!usedB.has(j)) onlyB.push(bothRan ? {...g, addedDate:true} : g); });
   }
-  for (const k in ga) if (!gb[k]) onlyA.push(ga[k]);
   return {matched, newOnes: onlyB, lostOnes: onlyA};
 }
 
@@ -2491,7 +2527,9 @@ function generateInsights(primaryYear, compareYear, scope){
     // (Elite, Key, or Traditional). Mesa Marketplace, Service Events, Malls,
     // RLT, and Industry events don't belong in this insight.
     const ALLOWED_NEW = new Set(['Elite', 'Key', 'Traditional']);
-    const eligibleNew = m.newOnes.filter(o => ALLOWED_NEW.has(o.category));
+    // An added date is not a new event, and the line below would state outright
+    // that it "didn't appear" last season, which is false for those.
+    const eligibleNew = m.newOnes.filter(o => ALLOWED_NEW.has(o.category) && !o.addedDate);
     if (eligibleNew.length) {
       const topNew = [...eligibleNew].sort((x,y) => y.total - x.total)[0];
       if (topNew.total >= 5000) {
@@ -3980,12 +4018,12 @@ function renderEvent(){
     if (tab === 'declined') rows = rows.filter(r => r.diff < 0);
   } else if (tab === 'new') {
     rows = eligibleNew.map(o => ({
-      name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month,
+      name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month, dateOnly: o.addedDate,
       vA: 0, vB: o.total, oA: 0, oB: o.orders, diff: o.total, pct: null
     }));
   } else if (tab === 'lost') {
     rows = m.lostOnes.map(o => ({
-      name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month,
+      name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month, dateOnly: o.droppedDate,
       vA: o.total, vB: 0, oA: o.orders, oB: 0, diff: -o.total, pct: -1
     }));
   }
@@ -4044,7 +4082,9 @@ function renderEvent(){
     rank++;
     const dCls = deltaClass(r.diff);
     html += `<tr>
-      <td class="cat"><span style="font-family:var(--mono);font-size:9.5px;color:var(--faded);margin-right:8px;">${String(rank).padStart(2,'0')}</span>${escapeHtml(r.name)}</td>
+      <td class="cat"><span style="font-family:var(--mono);font-size:9.5px;color:var(--faded);margin-right:8px;">${String(rank).padStart(2,'0')}</span>${escapeHtml(r.name)}${
+        r.dateOnly ? ` <span class="badge by" title="this show runs in both seasons; it is an extra or missing date, not a new or lost show">${tab === 'new' ? 'added' : 'dropped'} date</span>` : ''
+      }</td>
       <td style="white-space:nowrap;">${catTag(r.cat)}${r.tev ? terrTag(r.tev) : ''}</td>
       <td style="color:var(--mut);white-space:nowrap;">${
         r.monthA != null && r.monthA !== r.month
@@ -4297,15 +4337,21 @@ function renderBridge(primary, bench, primEvs, benchEvs){
   }
   html += `</div>`;
   const top = (arr, f, n = 6) => arr.slice().sort((x, y) => Math.abs(f(y)) - Math.abs(f(x))).slice(0, n);
-  const li = (name, cat, delta) => `<li><span class="ly-name" title="${escapeHtml(name)}">${escapeHtml(name)} ${lyCatTag(cat)}</span><span class="r ${deltaClass(delta)}">${fmtDelta$(delta)}</span></li>`;
+  // An extra running of a show that also ran in the benchmark season is an added
+  // date, not a new event -- saying "new" about a show Alan has worked for years
+  // is what makes this panel look wrong.
+  const dateTag = o => o.addedDate ? `<span class="badge by ly-tag" title="this show also ran in ${bench}; this is an extra date, not a new show">added date</span>`
+                     : o.droppedDate ? `<span class="badge by ly-tag" title="this show also runs in ${primary}; this is a date it is not working, not a lost show">dropped date</span>` : '';
+  const li = (name, cat, delta, tag) => `<li><span class="ly-name" title="${escapeHtml(name)}">${escapeHtml(name)} ${lyCatTag(cat)}</span>${tag || ''}<span class="r ${deltaClass(delta)}">${fmtDelta$(delta)}</span></li>`;
   const lists = [
     ['Same events, grew', top(grew, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
     ['Same events, declined', top(decl, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
-    ['New events', top(m.newOnes, o => o.total).map(o => li(o.eventDisplay, o.category, o.total))],
-    ['Not worked (yet)', top(m.lostOnes, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total))],
+    ['New events', top(m.newOnes, o => o.total).map(o => li(o.eventDisplay, o.category, o.total, dateTag(o)))],
+    ['Not worked (yet)', top(m.lostOnes, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total, dateTag(o)))],
   ];
   html += `<div class="ly-grid4">` + lists.map(([t, items]) => `<div class="ly-list"><div class="ly-list-t">${t}</div>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="dim" style="font-size:12px;margin:0;">None</p>`}</div>`).join('') + `</div>`;
-  html += `<p class="ly-note">Booth shows match across seasons by name (monthly series by name and month), the same way the By Event page matches them.${movedB.size ? ` ${movedB.size} event${movedB.size === 1 ? '' : 's'} booked for a later month this season (${[...movedB.values()].slice(0, 4).map(x => escapeHtml(x.o.eventDisplay)).join(', ')}${movedB.size > 4 ? '…' : ''}) are left out of "not worked (yet)"; see By Event → Moved later.` : ''}</p>`;
+  const addedDates = m.newOnes.filter(o => o.addedDate).length, droppedDates = m.lostOnes.filter(o => o.droppedDate).length;
+  html += `<p class="ly-note">Booth shows match across seasons by name; a show that runs more than once a season matches run for run on the closest month, allowing up to ${MONTH_DRIFT} months of drift, the same way the By Event page matches them.${addedDates || droppedDates ? ` ${[addedDates ? `${addedDates} added date${addedDates === 1 ? '' : 's'}` : '', droppedDates ? `${droppedDates} dropped date${droppedDates === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')} ${addedDates + droppedDates === 1 ? 'is an extra or missing running of a show that runs in both seasons, so it is not a new or lost show' : 'are extra or missing runnings of shows that run in both seasons, so they are not new or lost shows'} — they are tagged in the lists above.` : ''}${movedB.size ? ` ${movedB.size} event${movedB.size === 1 ? '' : 's'} booked for a later month this season (${[...movedB.values()].slice(0, 4).map(x => escapeHtml(x.o.eventDisplay)).join(', ')}${movedB.size > 4 ? '…' : ''}) are left out of "not worked (yet)"; see By Event → Moved later.` : ''}</p>`;
 
   // service events volume
   const avg = (evs) => evs.length ? sum(evs, e => e.total) / evs.length : 0;
