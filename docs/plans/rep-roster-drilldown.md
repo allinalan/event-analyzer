@@ -113,56 +113,87 @@ nulled. The UI reads `level` and renders the dollar columns as `—` when they a
 
 ---
 
-## 4. Phase A — pull the rosters (Mac mini, Chrome)
+## 4. Phase A — pull the rosters (Mac mini, Chrome) — **scripted, ready to run**
 
-### 4.1 Don't click 387 times
+### 4.1 The endpoint
 
-The modal is ExtJS, like the rest of VectorConnect. Open DevTools → Network, filter to **Fetch/XHR**,
-clear the list, click the blue person icon once, and capture the request it fires. It will carry the
-event id (`00081320`). Then loop that request over every event id in the Event Sales grid store
-rather than driving the UI.
+The blue person icon is a plain GET against an ExtJS pivot endpoint. No token, no POST body:
 
-**Capture the URL, method, payload and response shape — nothing else.** Do not use *Copy as cURL*
-and do not copy the Request Headers block: both embed the live session cookie, and the script does
-not need them (it runs inside the authenticated browser and inherits the session). This applies to
-anyone running the pull, buyers included.
+```
+GET /event/reports/orderSummary
+      ?_dc=1789771445778      // ExtJS cache-buster — pass Date.now()
+      &event=00081320         // the VC event id
+      &repNumber=             // empty: the pivot's other axis
+      &type=repName           // pivot by rep
+      &page=1&start=0&limit=25
+```
 
-Fallbacks, in order of preference:
-1. The captured endpoint, looped over event ids — one small call per event, fast and unattended.
-2. The modal's store, resolved by `itemId` through `Ext.getCmp` / `cascade`, opened and read per row
-   (same pattern as the `__slice` runner in `vectorconnect-coordinator-pay`).
-3. Click + modal Export, 387 times. Last resort. The export filenames will not identify the event,
-   so record the id → filename mapping as each lands.
+```json
+{ "rows": [ { "summaryField": "Matt Foss", "cpo": 23939.0, "orders": 19,
+              "average": 1259.94736, "orderDate": "1969-12-31", "id": 7 } ] }
+```
 
-### 4.2 Rules that carry over from the existing VC skills
+Run from inside the logged-in tab it inherits the session cookie, which is why no credential ever
+has to be copied anywhere.
+
+### 4.2 `limit=25` is a live truncation trap
+
+The endpoint defaults to 25 rows and the response carries **no total count**. A show with 26+
+selling reps would come back silently short and look entirely plausible. `tools/pull-rosters.js`
+requests `limit=500` and **throws if the row count ever reaches the ceiling** rather than trusting
+it. The per-event tie-out (§4.4) catches it a second time.
+
+### 4.3 The Event Sales grid is not needed
+
+All 1,067 events in `data.json` carry an 8-digit zero-padded VC id in `eventRaw`, all unique, all
+parseable — the exact format the `event=` param takes. So the pull reads its targets from
+`data.json` and asks about each id directly. No campaign presets, no division filter, no event-type
+multi-select, no `Totals for N Events` sanity check. Every filter that could silently fail to apply
+is simply absent from this path.
+
+### 4.4 The three steps
+
+```sh
+# 1. targets: 387 events for 2025+2026 (events with no orders are skipped)
+node tools/roster-targets.mjs 2025 2026 > roster-targets.json
+
+# 2. in the one logged-in VectorConnect tab's console:
+#    window.__TARGETS = <paste roster-targets.json>
+#    <paste tools/pull-rosters.js>
+#    await pullRosters()          -> downloads roster-raw.json, ~1 min
+
+# 3. build at the chosen exposure level (§8)
+node tools/build-roster.mjs roster-raw.json --level=names
+```
+
+Step 2 ties each event out as it lands: the rep rows must sum to the `total` and `orders` already
+stored for that event. Step 3 re-validates against `data.json` independently and **refuses to
+publish any event that does not tie out**, so a truncated or hand-edited pull cannot reach the site.
+
+Verified end to end against the real Maricopa response: the seven reps tie to $87,061 / 102 orders
+and publish; a deliberately truncated roster and an unknown event id are both rejected; and at
+`--level=names` neither the string `"cpo"` nor the value `6626` appears anywhere in the output file.
+
+### 4.5 Two things worth knowing
+
+**No rep number comes back.** The response `id` is a row ordinal (1..7), not a rep id — even though
+`repNumber` is an accepted request param. `vectorconnect-coordinator-pay` warns to key reps on
+`repNumber` because names repeat across divisions. Within one event the names are unique so the
+roster is safe, but **anything that later aggregates reps across events must not key on name alone.**
+
+**`type=repName` implies sibling pivots.** The `orderDate` field comes back as `1969-12-31` (epoch
+zero) here because this pivot is by rep, not date — which strongly suggests `type=orderDate` and
+friends exist behind the other four Details icons, on the same endpoint. `repNumber` + a date pivot
+would give rep × day × event. Worth one probe; not needed for this build.
+
+### 4.6 Rules that carry over
 
 - **One tab. Only ever one tab.** A second VectorConnect tab kills the session and dumps every tab
-  to login, mid-run. Navigate the existing tab; never `tabs_create` against vectorconnect.com.
-- Resolve components by `itemId`, never by a remembered auto-generated id.
-- `Ext` being `undefined` means the page bounced to login — check `location.href` and say so.
-- Echo the applied filters back with each pull. A silently-unapplied filter is the one failure mode
-  that produces plausible wrong numbers.
-
-### 4.3 Scope the grid before pulling
-
-Event Sales, period by campaign preset, **all seven event types**, Division 75. Per campaign:
-C1 (Jan–Apr), C2 (May–Aug), C3 (Sep–Dec). Six runs covers 2025 + 2026; twelve covers 2023–2026.
-
-Sanity-check the grid's `Totals for N Events` against `data.json`'s count for that window before
-pulling any rosters. If the count is off, a filter didn't apply.
-
-### 4.4 Join and validate
-
-Join on the **VC event id**, parsed from the leading digits of `eventRaw` (`00081320`). Every one of
-the 1,067 events has one. No name matching, no date matching, no fuzzy anything.
-
-Per event, assert `sum(roster[].cpo) == total` and `sum(roster[].orders) == orders`. Report every
-mismatch rather than writing it silently — a mismatch means either the grid was filtered differently
-than the Analyzer's stored figure, or the event was re-ranked since the last upload.
-
-Report before writing: events pulled, events tied out, events that didn't, distinct rep names found.
-
----
+  to login, mid-run. The scripts only read, so a re-run after re-login is always safe.
+- A response that is not JSON means the session bounced to login — `pull-rosters.js` detects this by
+  content type and stops rather than logging 300 cryptic parse errors.
+- Never *Copy as cURL* and never copy the Request Headers block: both embed the live session cookie,
+  and nothing in this pipeline needs them. Applies to buyers too.
 
 ## 5. Phase B — the drill-down UI (`index.html`)
 
@@ -274,15 +305,15 @@ will lose an afternoon reconciling numbers that were never meant to match.
 | # | Step | Where | Blocks |
 |---|---|---|---|
 | ~~0~~ | ~~Details probe~~ | — | **Done — Summary by Rep confirmed** |
-| 1 | Capture the modal's network request | Chrome, Mac | 2 |
-| 2 | Loop it over event ids, per campaign; tie out each event | Mac | 3 |
-| 3 | Emit `roster.json` for 2025 + 2026 at the configured level (§8) | Mac | 4 |
+| ~~1~~ | ~~Capture the modal's network request~~ | — | **Done — endpoint documented in §4.1** |
+| 2 | `roster-targets.mjs` → paste `pull-rosters.js` → `await pullRosters()` | Mac | 3 |
+| 3 | `build-roster.mjs roster-raw.json --level=…` (§8) | Mac | 4 |
 | 4 | Drill-down UI, shift columns dashed | repo | 5 |
 | 5 | Ship: commit `index.html` (+ `roster.json` if level ≠ `off`), push | repo | — |
-| 6 | Backfill 2023 + 2024 (same script, wider window) | Mac | — |
+| 6 | Backfill 2023 + 2024 — `roster-targets.mjs 2023 2024`, same two steps | Mac | — |
 | 7 | Phase C overlay: shifts, CPO/shift, scheduled-but-sold-nothing | Mac | — |
 
-**Steps 1–5 deliver the feature as asked.** Everything after is upside.
+**Steps 2–5 deliver the feature as asked.** Everything after is upside.
 
 Set the exposure level (§8) before step 3 — it decides what step 3 writes. `off` is the default and
 still gives the owner the full roster locally.
@@ -367,7 +398,8 @@ block the build either way.
 
 ## 10. Still open
 
-- **The other four Details icons.** Green `$`, orange flag, red calendar, red tag. One click each,
+- **The other four Details icons.** Green `$`, orange flag, red calendar, red tag. Likely the same
+  `orderSummary` endpoint at other `type=` values (§4.5). One probe each,
   sometime — one may be items-sold detail worth having.
 - **2023/2024 backfill.** The original reason to skip them was shift-schedule coverage. VC covers
   them at 89% and 84%, so they are now a longer script run rather than extra work.
