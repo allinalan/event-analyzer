@@ -1919,6 +1919,24 @@ function totalsFor(events){
   return {cpo, orders, count, avg: orders ? cpo/orders : 0};
 }
 
+// "New" has to mean never worked, not merely absent from the one season we
+// happen to be comparing against. El Paso Home & Garden's fall running went Sep
+// 2023, Oct 2024, nothing in 2025, Aug 2026: it is back, not new. Returns the
+// most recent season before `beforeYear` in which the show actually ran, or null.
+// A $0 / no-orders row is a booking that did not run (the dashboard excludes
+// those from every total), so it is not evidence the show ran -- Cherry Festival
+// is only on the 2024 books as a no-show. Pass `nearMonth` to ask about one
+// running's slot in the year rather than the show as a whole.
+function priorRunning(eventNorm, beforeYear, nearMonth){
+  let past = STATE.events.filter(e =>
+    e.eventNorm === eventNorm && e.year < beforeYear && !didNotRun(e));
+  if (nearMonth != null) past = past.filter(e => Math.abs(e.month - nearMonth) <= MONTH_DRIFT);
+  if (!past.length) return null;
+  const year = Math.max(...past.map(e => e.year));
+  const months = [...new Set(past.filter(e => e.year === year).map(e => e.month))].sort((a, b) => a - b);
+  return { year, months };
+}
+
 // How far a show may slide between seasons and still be the same running.
 // One or two months is the usual drift (Maricopa moved May→Apr and Oct→Sep in
 // the same year); a jump of a whole season is a different date, not a move.
@@ -2529,7 +2547,8 @@ function generateInsights(primaryYear, compareYear, scope){
     const ALLOWED_NEW = new Set(['Elite', 'Key', 'Traditional']);
     // An added date is not a new event, and the line below would state outright
     // that it "didn't appear" last season, which is false for those.
-    const eligibleNew = m.newOnes.filter(o => ALLOWED_NEW.has(o.category) && !o.addedDate);
+    const eligibleNew = m.newOnes.filter(o => ALLOWED_NEW.has(o.category) && !o.addedDate
+      && !priorRunning(o.eventNorm, compareYear, null));
     if (eligibleNew.length) {
       const topNew = [...eligibleNew].sort((x,y) => y.total - x.total)[0];
       if (topNew.total >= 5000) {
@@ -4017,10 +4036,14 @@ function renderEvent(){
     if (tab === 'grew') rows = rows.filter(r => r.diff > 0);
     if (tab === 'declined') rows = rows.filter(r => r.diff < 0);
   } else if (tab === 'new') {
-    rows = eligibleNew.map(o => ({
-      name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month, dateOnly: o.addedDate,
-      vA: 0, vB: o.total, oA: 0, oB: o.orders, diff: o.total, pct: null
-    }));
+    rows = eligibleNew.map(o => {
+      const back = priorRunning(o.eventNorm, STATE.evYearA, o.addedDate ? o.month : null);
+      return {
+        name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month,
+        dateOnly: o.addedDate && !back, backFrom: back,
+        vA: 0, vB: o.total, oA: 0, oB: o.orders, diff: o.total, pct: null
+      };
+    });
   } else if (tab === 'lost') {
     rows = m.lostOnes.map(o => ({
       name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month, dateOnly: o.droppedDate,
@@ -4083,7 +4106,8 @@ function renderEvent(){
     const dCls = deltaClass(r.diff);
     html += `<tr>
       <td class="cat"><span style="font-family:var(--mono);font-size:9.5px;color:var(--faded);margin-right:8px;">${String(rank).padStart(2,'0')}</span>${escapeHtml(r.name)}${
-        r.dateOnly ? ` <span class="badge by" title="this show runs in both seasons; it is an extra or missing date, not a new or lost show">${tab === 'new' ? 'added' : 'dropped'} date</span>` : ''
+        r.backFrom ? ` <span class="badge bb" title="last ran in ${r.backFrom.year} (${r.backFrom.months.map(x => MONTH_NAMES[x]).join(', ')}); not in ${STATE.evYearA}, so it is back rather than new">back from ${r.backFrom.year}</span>`
+        : r.dateOnly ? ` <span class="badge by" title="this show runs in both seasons; it is an extra or missing date, not a new or lost show">${tab === 'new' ? 'added' : 'dropped'} date</span>` : ''
       }</td>
       <td style="white-space:nowrap;">${catTag(r.cat)}${r.tev ? terrTag(r.tev) : ''}</td>
       <td style="color:var(--mut);white-space:nowrap;">${
@@ -4292,12 +4316,17 @@ function renderBridge(primary, bench, primEvs, benchEvs){
   const m = { ...m0b, lostOnes: m0b.lostOnes.filter(o => !movedB.has(o)) };
   const grew = m.matched.filter(x => x.b.total > x.a.total);
   const decl = m.matched.filter(x => x.b.total < x.a.total);
+  // An unpaired running still has to land in this bucket for the bridge to add
+  // up, but the heading should not call the bucket new when part of it is not.
+  const backOf = new Map(m.newOnes.map(o => [o, priorRunning(o.eventNorm, bench, o.addedDate ? o.month : null)]));
+  const backCount = [...backOf.values()].filter(Boolean).length;
+  const newLabel = backCount ? 'New & returning' : 'New events';
   const boothStart = sum(bB, e => e.total), boothEnd = sum(bP, e => e.total);
   const steps = [
     { lbl: `${bench}`, v: boothStart, abs: true },
     { lbl: 'Same events, grew', v: sum(grew, x => x.b.total - x.a.total), n: grew.length },
     { lbl: 'Same events, declined', v: sum(decl, x => x.b.total - x.a.total), n: decl.length },
-    { lbl: 'New events', v: sum(m.newOnes, o => o.total), n: m.newOnes.length },
+    { lbl: newLabel, v: sum(m.newOnes, o => o.total), n: m.newOnes.length },
     { lbl: 'Not worked (yet)', v: -sum(m.lostOnes, o => o.total), n: m.lostOnes.length },
     { lbl: `${primary}`, v: boothEnd, abs: true },
   ];
@@ -4337,21 +4366,30 @@ function renderBridge(primary, bench, primEvs, benchEvs){
   }
   html += `</div>`;
   const top = (arr, f, n = 6) => arr.slice().sort((x, y) => Math.abs(f(y)) - Math.abs(f(x))).slice(0, n);
-  // An extra running of a show that also ran in the benchmark season is an added
-  // date, not a new event -- saying "new" about a show Alan has worked for years
-  // is what makes this panel look wrong.
-  const dateTag = o => o.addedDate ? `<span class="badge by ly-tag" title="this show also ran in ${bench}; this is an extra date, not a new show">added date</span>`
-                     : o.droppedDate ? `<span class="badge by ly-tag" title="this show also runs in ${primary}; this is a date it is not working, not a lost show">dropped date</span>` : '';
+  // Saying "new" about a show Alan has worked for years is what makes this panel
+  // look wrong. Two different things hide behind an unpaired running: a date the
+  // show has run before and is returning to after a gap, and a genuinely extra
+  // date on a show that never stopped. The first outranks the second.
+  const monthList = ms => ms.map(x => MONTH_NAMES[x]).join(', ');
+  const newTag = o => {
+    const back = backOf.get(o);
+    if (back) return `<span class="badge bb ly-tag" title="${o.addedDate
+      ? `this date last ran in ${back.year} (${monthList(back.months)}); ${bench} had no run in this part of the year`
+      : `ran in ${back.year} (${monthList(back.months)}); did not run in ${bench}`}">back from ${back.year}</span>`;
+    if (o.addedDate) return `<span class="badge by ly-tag" title="this show also ran in ${bench}; this is an extra date, not a new show">added date</span>`;
+    return '';
+  };
+  const lostTag = o => o.droppedDate ? `<span class="badge by ly-tag" title="this show also runs in ${primary}; this is a date it is not working, not a lost show">dropped date</span>` : '';
   const li = (name, cat, delta, tag) => `<li><span class="ly-name" title="${escapeHtml(name)}">${escapeHtml(name)} ${lyCatTag(cat)}</span>${tag || ''}<span class="r ${deltaClass(delta)}">${fmtDelta$(delta)}</span></li>`;
   const lists = [
     ['Same events, grew', top(grew, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
     ['Same events, declined', top(decl, x => x.b.total - x.a.total).map(x => li(x.b.eventDisplay, x.b.category, x.b.total - x.a.total))],
-    ['New events', top(m.newOnes, o => o.total).map(o => li(o.eventDisplay, o.category, o.total, dateTag(o)))],
-    ['Not worked (yet)', top(m.lostOnes, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total, dateTag(o)))],
+    [newLabel, top(m.newOnes, o => o.total).map(o => li(o.eventDisplay, o.category, o.total, newTag(o)))],
+    ['Not worked (yet)', top(m.lostOnes, o => o.total).map(o => li(o.eventDisplay, o.category, -o.total, lostTag(o)))],
   ];
   html += `<div class="ly-grid4">` + lists.map(([t, items]) => `<div class="ly-list"><div class="ly-list-t">${t}</div>${items.length ? `<ul>${items.join('')}</ul>` : `<p class="dim" style="font-size:12px;margin:0;">None</p>`}</div>`).join('') + `</div>`;
-  const addedDates = m.newOnes.filter(o => o.addedDate).length, droppedDates = m.lostOnes.filter(o => o.droppedDate).length;
-  html += `<p class="ly-note">Booth shows match across seasons by name; a show that runs more than once a season matches run for run on the closest month, allowing up to ${MONTH_DRIFT} months of drift, the same way the By Event page matches them.${addedDates || droppedDates ? ` ${[addedDates ? `${addedDates} added date${addedDates === 1 ? '' : 's'}` : '', droppedDates ? `${droppedDates} dropped date${droppedDates === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')} ${addedDates + droppedDates === 1 ? 'is an extra or missing running of a show that runs in both seasons, so it is not a new or lost show' : 'are extra or missing runnings of shows that run in both seasons, so they are not new or lost shows'} — they are tagged in the lists above.` : ''}${movedB.size ? ` ${movedB.size} event${movedB.size === 1 ? '' : 's'} booked for a later month this season (${[...movedB.values()].slice(0, 4).map(x => escapeHtml(x.o.eventDisplay)).join(', ')}${movedB.size > 4 ? '…' : ''}) are left out of "not worked (yet)"; see By Event → Moved later.` : ''}</p>`;
+  const addedDates = m.newOnes.filter(o => o.addedDate && !backOf.get(o)).length, droppedDates = m.lostOnes.filter(o => o.droppedDate).length;
+  html += `<p class="ly-note">Booth shows match across seasons by name; a show that runs more than once a season matches run for run on the closest month, allowing up to ${MONTH_DRIFT} months of drift, the same way the By Event page matches them.${backCount ? ` ${backCount} of the ${m.newOnes.length} in "${newLabel}" ${backCount === 1 ? 'is a show or a date that ran in an earlier season, skipped ' + bench + ' and is back' : 'are shows or dates that ran in an earlier season, skipped ' + bench + ' and are back'} — tagged <em>back from</em> the season ${backCount === 1 ? 'it' : 'they'} last ran, since ${backCount === 1 ? 'it is' : 'they are'} not new. A booking that never ran (no sales, no orders) does not count as having run.` : ''}${addedDates || droppedDates ? ` ${[addedDates ? `${addedDates} added date${addedDates === 1 ? '' : 's'}` : '', droppedDates ? `${droppedDates} dropped date${droppedDates === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')} ${addedDates + droppedDates === 1 ? 'is an extra or missing running of a show that runs in both seasons, so it is not a new or lost show' : 'are extra or missing runnings of shows that run in both seasons, so they are not new or lost shows'} — tagged in the lists above.` : ''}${movedB.size ? ` ${movedB.size} event${movedB.size === 1 ? '' : 's'} booked for a later month this season (${[...movedB.values()].slice(0, 4).map(x => escapeHtml(x.o.eventDisplay)).join(', ')}${movedB.size > 4 ? '…' : ''}) are left out of "not worked (yet)"; see By Event → Moved later.` : ''}</p>`;
 
   // service events volume
   const avg = (evs) => evs.length ? sum(evs, e => e.total) / evs.length : 0;
