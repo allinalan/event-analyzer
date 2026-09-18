@@ -1,108 +1,190 @@
 # Rep roster drill-down — build plan
 
 **Goal:** on the **By Event** tab, clicking an event row expands a panel showing the reps who
-worked it, how many shifts each took, and (once Phase C lands) each rep's orders and CPO at that
-event.
+worked it, their orders, their CPO, and their average order.
 
-**Status:** planned, not built. Written to be executed locally on the Mac mini, where both
-VectorConnect (Chrome session) and the Google Sheets API are reachable.
+**Status:** planned, not built. Runs locally on the Mac mini, where VectorConnect is reachable
+through Chrome.
+
+> **Revised 2026-09-18.** The Details probe came back positive and inverted the plan. VectorConnect
+> serves the whole roster — names, orders and CPO — in one modal per event. The Show Shift Schedule
+> is no longer the primary source; it becomes an overlay. The 513-query day-grain join that the
+> first draft specced is **deleted** — it is not needed.
 
 ---
 
-## 1. Why this can't be built from the data we have
+## 1. The source: "Summary by Rep"
 
-`data.json` holds 1,067 events. Every one carries:
+Eventalytics → **Event Sales** → the **blue person icon** in the Details column of any event row
+opens `Summary by Rep for <event id> - <event name>`:
 
-- a VectorConnect event ID in `eventRaw` (`00090355 - Tyson Wells Rock & Gem Show`) — a clean
-  join key to anything pulled from VC
-- `total` (CPO dollars), `orders`, and `shifts`
-
-and **no rep names anywhere**. `shifts` is the ghost of the data we want: the automation that
-produced it read names off the Show Shift Schedule, counted them, and discarded the names.
-
-### Coverage ceiling — decide the empty state before building
-
-| Season | Events | With shift data | Coverage |
+| Rep | CPO | Orders | Average |
 |---|---|---|---|
-| 2025 | 296 | 134 | 45% |
-| 2026 | 170 | 71 | 42% |
+| Adam Conroy | $6,626 | 14 | $473 |
+| Alan Hernandez | $10,167 | 18 | $565 |
+| Alec Luyendyk | $17,668 | 15 | $1,178 |
+| Jason Jeffrey | $11,942 | 17 | $702 |
+| Jeremy Katen | $1,207 | 1 | $1,207 |
+| Luke Mills | $15,512 | 18 | $862 |
+| Matt Foss | $23,939 | 19 | $1,260 |
+| | **$87,061** | **102** | **$854** |
 
-Service, realtor and industry events are rarely on the shift schedule. **More than half of rows
-will have no roster.** Phase A step 1 may lift this — the current numbers come from an automation
-that may only have read one of the three workbooks.
+The modal has its own **Export** button.
 
-### It's a crew, not a rep
+**It ties out exactly.** `data.json` already holds `00081320 - Maricopa County Home & Garden Show`
+at `total: 87061, orders: 102`. The rep rows sum to the dollar and to the order. This is not an
+inferred attribution — it is the same number the Analyzer already displays, broken apart by the
+system that owns it.
 
-2025 averages **3.9 rep-days per event**, 2026 averages **4.9**. Multi-day shows rotate people.
-The drill-down is a roster table with a row per rep, not a single name.
+**It gives full names.** `Matt Foss`, not `Foss`. `Adam Conroy`, not `Adam C`. That makes
+VectorConnect the naming authority and collapses most of the alias problem the first draft agonised
+over.
+
+**It crosses divisions.** Jeremy Katen appears with a single order. Anyone who wrote an order at the
+event shows up, regardless of division.
+
+The other four Details icons (green `$`, orange flag, red calendar, red tag) are unexplored. Not
+chasing them now, but worth one click each sometime — one of them may be items-sold detail.
 
 ---
 
-## 2. Step 0 — the Details probe (blocks Phase C, nothing else)
+## 2. Coverage — this is the part that changed most
 
-Per the `vectorconnect-eventalytics-report` skill, each **Event Sales** row begins with a
-**Details icon**, and nothing documents what's behind it.
+Any event with orders has a rep summary. The shift schedule only ever covered the events someone
+remembered to staff on a spreadsheet.
 
-On the Mac, in Chrome: `vectorconnect.com/event/reports` → expand **Event Sales** → set any
-campaign period + Division 75 → **Get Data** → click the **Details** icon on one row.
+| Season | Events | Roster from shift schedule | Roster from VC | Gain |
+|---|---|---|---|---|
+| 2025 | 296 | 134 | **249** | +115 |
+| 2026 | 170 | 71 | **138** | +67 |
+| 2024 | 315 | 40 | **264** | +224 |
+| 2023 | 286 | 51 | **253** | +202 |
 
-Report back: does the panel break the event down **by rep**? If yes, capture the column headers
-and one sample row, and check whether it loads into an ExtJS store (`Ext.getCmp`, or a network
-call in DevTools) that a script can walk for every row in a loop.
+**2025 + 2026: 387 of 466 events get a roster, up from 205.** 44% → 83%. The remaining 79 have zero
+orders, so there is genuinely nothing to show.
 
-| Outcome | Consequence |
-|---|---|
-| Details lists reps | **Phase C1.** One report per campaign. The 513-query plan is dead. |
-| Details is product/item detail, or no rep breakdown | **Phase C2.** Day-grain Team Sales join. |
+And 2023/2024 are now cheap. The first draft dropped them because the shift schedule barely covered
+them; VC covers them at 84% and 89%. Including them is a longer script run, not extra work.
 
-Phases A and B do not wait on this.
+The Maricopa event above makes the point on its own: `shifts: null` in `data.json` — the shift
+schedule never had it — and VC hands over seven named reps with dollars attached.
 
 ---
 
 ## 3. Data model — the `roster` field
 
-One optional `roster` array per event object in `data.json`. Absent = never staffed from the
-schedule; present-but-empty = block found, no names in it.
-
 ```json
 {
-  "eventRaw": "00090355 - Tyson Wells Rock & Gem Show",
-  "eventNorm": "tyson wells rock & gem show",
-  "shifts": 14,
+  "eventRaw": "00081320 - Maricopa County Home & Garden Show",
+  "total": 87061,
+  "orders": 102,
   "roster": [
     {
-      "rep": "Adam C",           // canonical name, post-alias-map
-      "raw": ["Adam C", "Adam c"], // every spelling seen, for auditing
-      "days": ["2026-01-02", "2026-01-03", "2026-01-04"],
-      "shifts": 3,               // = days.length, raw rep-days
-      "trainees": ["Arianna"],   // from "(FT- Ann)" annotations; [] when none
-      "orders": null,            // Phase C
-      "cpo": null                // Phase C
+      "rep": "Adam Conroy",   // full name, from VectorConnect
+      "cpo": 6626,
+      "orders": 14,
+      "avg": 473,
+      "shifts": null,         // Phase C overlay; null = not on the shift schedule
+      "days": null,           // Phase C overlay
+      "scheduled": null       // Phase C overlay: true/false once the sheet is parsed
     }
   ],
-  "rosterSource": "Jan-May Show Shift Schedule / 2026 tab",
-  "rosterPulledAt": "2026-09-18T00:00:00.000Z"
+  "rosterPulledAt": "2026-09-18T00:00:00.000Z",
+  "rosterTieOut": true        // rep rows summed to `total` and `orders`
 }
 ```
 
-**`shifts` vs roster `shifts`.** The Mesa counter applies half-shift rules (Fri/Sun with 2 people
-= 0.5 each). That's a *pay* rule, not a *presence* rule. `roster[].shifts` is raw rep-days —
-one rep, one day, one shift. Keep the two definitions separate and labelled, or the roster totals
-won't tie to the Mesa counter and someone will spend an afternoon on it.
+`rosterTieOut` is the cheap integrity flag — set it per event at parse time. A `false` means VC's
+own numbers disagreed with each other and the row needs eyes, not that the join is wrong.
 
-**Size:** roughly 200 events × ~5 reps. Well under 100 KB added to a 622 KB `data.json` — inline is
-fine. If it ever becomes a page-load problem, split to a lazy-loaded `roster.json` keyed by
-`eventRaw`.
+**Size:** 387 events × ~6 reps ≈ 2,300 entries, well under 200 KB on a 622 KB `data.json`. Inline is
+fine. If it ever bites, split to a lazy-loaded `roster.json` keyed on `eventRaw`.
 
 ---
 
-## 4. Phase A — roster from the Show Shift Schedule
+## 4. Phase A — pull the rosters (Mac mini, Chrome)
 
-Runs locally. No VectorConnect needed.
+### 4.1 Don't click 387 times
 
-### 4.1 Sources
+The modal is ExtJS, like the rest of VectorConnect. Open DevTools → Network, click the blue person
+icon once, and capture the request it fires. It will carry the event id (`00081320`). Then loop that
+request over every event id in the Event Sales grid store rather than driving the UI.
 
-Three rolling workbooks, all reachable from Alan's Drive:
+Fallbacks, in order of preference:
+1. The captured endpoint, looped over event ids — one small call per event, fast and unattended.
+2. The modal's store, resolved by `itemId` through `Ext.getCmp` / `cascade`, opened and read per row
+   (same pattern as the `__slice` runner in `vectorconnect-coordinator-pay`).
+3. Click + modal Export, 387 times. Last resort. The export filenames will not identify the event,
+   so record the id → filename mapping as each lands.
+
+### 4.2 Rules that carry over from the existing VC skills
+
+- **One tab. Only ever one tab.** A second VectorConnect tab kills the session and dumps every tab
+  to login, mid-run. Navigate the existing tab; never `tabs_create` against vectorconnect.com.
+- Resolve components by `itemId`, never by a remembered auto-generated id.
+- `Ext` being `undefined` means the page bounced to login — check `location.href` and say so.
+- Echo the applied filters back with each pull. A silently-unapplied filter is the one failure mode
+  that produces plausible wrong numbers.
+
+### 4.3 Scope the grid before pulling
+
+Event Sales, period by campaign preset, **all seven event types**, Division 75. Per campaign:
+C1 (Jan–Apr), C2 (May–Aug), C3 (Sep–Dec). Six runs covers 2025 + 2026; twelve covers 2023–2026.
+
+Sanity-check the grid's `Totals for N Events` against `data.json`'s count for that window before
+pulling any rosters. If the count is off, a filter didn't apply.
+
+### 4.4 Join and validate
+
+Join on the **VC event id**, parsed from the leading digits of `eventRaw` (`00081320`). Every one of
+the 1,067 events has one. No name matching, no date matching, no fuzzy anything.
+
+Per event, assert `sum(roster[].cpo) == total` and `sum(roster[].orders) == orders`. Report every
+mismatch rather than writing it silently — a mismatch means either the grid was filtered differently
+than the Analyzer's stored figure, or the event was re-ranked since the last upload.
+
+Report before writing: events pulled, events tied out, events that didn't, distinct rep names found.
+
+---
+
+## 5. Phase B — the drill-down UI (`index.html`)
+
+**Where:** `renderEvent()` at `index.html:3920`; table HTML assembled from `4086` and written to
+`#evTable` at `4128`. Rows currently render flat into a `<tbody>`.
+
+**Interaction**
+- Caret in the Event cell, only on rows with a non-empty `roster`. No dead affordance on the rest.
+- Click toggles a `<tr class="roster-row"><td colspan="N">` immediately after the row.
+- Expansion state in `STATE`, keyed on `eventRaw`, so sorting or filtering doesn't collapse it.
+- Keyboard: `role="button"`, `tabindex="0"`, Enter/Space toggles, `aria-expanded` on the trigger.
+
+**Panel contents** — sorted by CPO descending:
+
+| Rep | Orders | CPO | Avg order | Shifts | CPO/shift |
+
+Shifts and CPO/shift render as `—` until Phase C. Em-dash, never `$0` — same rule as the RSD
+dashboard.
+
+**Design system** — `docs/history/event-analyzer-design.md`, don't bulldoze it: Fraunces for the
+panel heading, Geist for the table, Geist Mono for labels; tabular lining numerals on every figure;
+accent `#B45309` on the caret only; semantic colors only where a number means something; reuse
+`.tbl` / `.tbl-wrap`; no emoji.
+
+---
+
+## 6. Phase C — shift schedule overlay (optional, and now the interesting half)
+
+VC answers *who sold*. The shift schedule answers *who stood there*. **The gap between them is the
+coaching data.** A rep who worked three shifts and doesn't appear in Summary by Rep sold nothing —
+and nothing in the Analyzer can surface that today.
+
+So the overlay adds two things VC cannot know:
+1. `shifts` and `days` per rep — enabling **CPO per shift per rep**, which is the real productivity
+   number.
+2. Reps who were **scheduled but wrote no orders** — appended to the roster with `cpo: 0`,
+   `orders: 0`, `scheduled: true`, `sold: false`.
+
+### 6.1 Sources
 
 | Workbook | File ID | Last modified |
 |---|---|---|
@@ -110,31 +192,23 @@ Three rolling workbooks, all reachable from Alan's Drive:
 | May-Sep Show Shift Schedule | `17gPzz1g5JHIiou5BbMmUZQd2RvlMdvhqHr91l0E7Sgo` | 2026-08-30 |
 | Sept-Feb Show Shift Schedule | `10p5Ro2WpeJ7mMOyS92OWIT3w3Nl-KGX4vBMkXJoOCTs` | 2026-09-17 |
 
-**Step 1 — enumerate tabs before parsing anything.** These are rolling sheets; the Jan-May
-workbook currently shows 2027 dates on its front tab. Date cells across it span 2015–2018 and
-2023–2027, so old seasons appear to be retained as separate tabs — but confirm the tab list and
-map each tab to a season before trusting it. Use the **Sheets API** (`spreadsheets.get` →
-`sheets[].properties.title`), not a Drive export: the Drive export flattens every tab into one
-blob with no tab markers and truncates around 285 K characters.
+Enumerate tabs with the **Sheets API** (`spreadsheets.get` → `sheets[].properties.title`) and map
+each to a season first. A Drive export flattens every tab into one blob with no markers and
+truncates around 285 K characters.
 
-### 4.2 Column geometry — fixed, verified
-
-Columns are stable across the workbook. Zero-indexed, after splitting each row to cells:
+### 6.2 Column geometry — fixed, verified
 
 | Col | Contents |
 |---|---|
-| 1–11 | Weekend header row, merged: `Weekend 1/1` (month/day, **no year** — take the year from the tab) |
+| 1–11 | Weekend header, merged: `Weekend 1/1` (month/day, **no year** — year comes from the tab) |
 | 2 | Status — `Booked` / `Prospective` / `Cancelled` |
 | 3 | BEST CPO |
 | **4** | **Discriminator: event name on an event row, `Shift N` on a shift row** |
-| 5–11 | Day columns. Event row holds day-of-week labels (`Friday`…`Monday`, or `Fri`/`Sat`/`Sun`); shift rows hold **rep names in the same positions** |
+| 5–11 | Day columns. Event row holds day-of-week labels; shift rows hold rep names in the same positions |
 | 12 | Cost |
-| 13 / 14 | Start Date / End Date — `1/1/2027`. **Often blank** (Mesa rows have none) |
-| 15 | City, State |
-| 16 | Location |
+| 13 / 14 | Start Date / End Date — often blank |
+| 15 / 16 | City, State / Location |
 | 18–22 | Promoter, Contact, Phone, Email, Website |
-
-Worked example — a 3-day event and its shift row:
 
 ```
 col: 2:Booked  4:Mesa Market Place Swapmeet A ROW  5:Fri  6:Sat  7:Sun  12:$2,089.00  15:Mesa
@@ -142,145 +216,39 @@ col:           4:Shift 1                           5:Adam C  6:Adam c  7:Adam C
 col:           4:Shift 2
 ```
 
-### 4.3 Parse algorithm
+Walk rows carrying `current_weekend` and `current_event`. Zip each shift row's cols 5–11 against the
+parent event row's day labels. Resolve day columns to dates from cols 13/14 when present, else the
+weekend header + tab year walked forward to the labelled weekday. Ignore empty, `x`, `X`, `-`,
+`TBD`. Multiple `Shift N` rows under one event union into that event's roster.
 
-1. Walk rows in order, carrying `current_weekend` (from the last `Weekend M/D` header) and
-   `current_event`.
-2. Col 4 matches `^Shift\s*\d+$` → shift row, belongs to `current_event`. Otherwise non-empty
-   col 4 → new event row; capture name, status, dates, city, and the **day labels in cols 5–11**.
-3. For each shift row, zip cols 5–11 against the parent event's day labels. A non-ignored cell at
-   position *i* means that rep worked the day labelled at position *i*.
-4. **Resolve each day column to a real date:** prefer cols 13/14 (Start/End Date) when present;
-   otherwise take the weekend header's `M/D` + the tab's year as the anchor and walk forward to
-   the day-of-week in the label. Emit both and assert they agree when both exist — a mismatch is
-   a sheet error worth surfacing, not silently picking one.
-5. Ignore cells that are empty, `x`, `X`, `-`, or `TBD`.
-6. Multiple `Shift N` rows under one event are all that event's roster — union them.
+Reference shape: `~/.claude/skills/.../count-mesa-shifts/scripts/count_shifts.py` — but it hardcodes
+3 day columns for Mesa; **the general parser must handle 2–7**, driven by the event row's labels.
 
-Reference implementation for the walk-and-flush shape:
-`~/.claude/skills/.../count-mesa-shifts/scripts/count_shifts.py`. Note it hardcodes 3 day columns
-for Mesa; **the general parser must handle 2–7 day columns** driven by the event row's labels.
+### 6.3 Name matching is now easy — match into the VC roster
 
-### 4.4 Name normalization
+This is the part Phase A rescued. Rather than resolving `Foss` against a global alias table, resolve
+it **against the handful of reps VC already placed at that event**. `Foss` → `Matt Foss`,
+`Adam C` → `Adam Conroy`, `Alec` → `Alec Luyendyk`, all unambiguous within a 7-name set.
 
-49 distinct name strings across the sample; 43 after lowercasing and stripping trailing periods.
-Roughly 25 real people. Every messiness class found, with the rule:
+Rules, applied in order: strip a trailing `.`; case-insensitive; match on first name, or on surname,
+or on `First L` against `First Last`. Then the cases the sheet actually contains:
 
 | Class | Examples | Rule |
 |---|---|---|
-| Case | `Matt A` / `Matt a`, `Adam C` / `Adam c`, `jerry` / `Jerry`, `kendall`, `cam` | Case-insensitive match, canonical form from the alias map |
-| Trailing period | `Adam C.` vs `Adam C` | Strip trailing `.` |
-| Nickname | `Cam` → `Cameron`, `JP` → `J. Parker` | Alias map |
-| Surname only | `Foss` → Matt Foss | Alias map |
-| Field trainee | `Alan (FT-Arianna)`, `Zach (FT- Ann)`, `Alan (ft-elizabeth)`, `Alan (Ft-David` *(unclosed paren)* | Rep = text before `(`; trainee name → `trainees[]`. Match `\(\s*ft\s*[-–]\s*([^)]*)` case-insensitive, tolerate the missing `)` |
-| Two people, one cell | `John and Roman` | Split on ` and ` / `&` / `/` → two roster entries, each a full shift |
-| Junk | `m` | Length-1 non-initial cells → drop, log for review |
+| Field trainee | `Alan (FT-Arianna)`, `Zach (FT- Ann)`, `Alan (Ft-David` *(unclosed paren)* | Rep = text before `(`; trainee → `trainees[]`. Match `\(\s*ft\s*[-–]\s*([^)]*)`, case-insensitive, tolerate the missing `)` |
+| Two in one cell | `John and Roman` | Split on ` and ` / `&` / `/` → two entries, each a full shift |
+| Nickname | `Cam` → Cameron, `JP` → J. Parker | Only if no VC match; keep a small alias file for these |
+| Junk | `m` | Length-1 non-initial → drop, log |
 
-**Deliverable: `tools/rep-aliases.json`** — a hand-reviewed map from every raw spelling to a
-canonical rep. Generate the first draft by frequency, have Alan confirm it once, then treat it as
-the standing source of truth. The parser **fails loudly on an unknown spelling** rather than
-inventing a new rep — that's what keeps a typo from becoming a phantom teammate.
+**Ambiguous or unmatched against that event's VC roster → report it, don't guess.** An unmatched name
+is either a rep who sold nothing (the signal we're after) or a typo, and those two must not be
+silently merged.
 
-### 4.5 Join to events
+### 6.4 `shifts` means two different things — keep them apart
 
-Key on `normalizeEventName()` (`index.html:1523` — strips the leading VC ID, lowercases, collapses
-dashes/whitespace) plus date overlap. This is the same key `schedule.years[]` entries already use
-via their `norm` field, and that join already lands 281 bookings for 2025 and 169 for 2026 — so
-reuse it rather than writing a second matcher.
-
-Ambiguity rule: if one sheet event maps to two `data.json` events, or vice versa, **report it, do
-not guess.** Same discipline as `tools/rerank.js`.
-
-### 4.6 Validation before writing
-
-- `sum(roster[].shifts)` per event vs the existing `shifts` field. Report every mismatch —
-  differences are expected where the old automation read fewer workbooks, and each one is either a
-  coverage win or a parser bug.
-- Event count with a roster vs the 134 / 71 baseline. **Higher is the hoped-for outcome**, lower
-  means the parser is dropping blocks.
-- Every raw name string resolved through the alias map, zero unknowns.
-
----
-
-## 5. Phase B — the drill-down UI (`index.html`)
-
-Independent of Phase C. Build it so the orders/CPO columns are additive.
-
-**Where:** `renderEvent()` at `index.html:3920`; the table HTML is assembled from `4086` and written to
-`#evTable` at `4128`. Rows currently render flat into a `<tbody>`.
-
-**Interaction**
-- A caret in the Event cell on rows where `roster` is present and non-empty. Rows without one are
-  not clickable and show no caret — no dead affordance on 55% of rows.
-- Click toggles a `<tr class="roster-row"><td colspan="N">` immediately after the row.
-- Expansion state in `STATE` keyed by `eventRaw`, so a re-render (sort, filter, chip) doesn't
-  collapse what's open.
-- Keyboard: `role="button"`, `tabindex="0"`, Enter/Space toggles, `aria-expanded` on the trigger.
-
-**Panel contents**
-| Rep | Shifts | Days | Orders | CPO | CPO/shift |
-
-Orders, CPO and CPO/shift render as `—` until Phase C lands — the same em-dash-not-`$0` rule the
-RSD dashboard uses. Trainees show as a small note under the rep name (`+ Arianna (FT)`).
-
-**Design system** — see `docs/history/event-analyzer-design.md`, don't bulldoze it:
-- Fraunces for the panel heading, Geist for the table, Geist Mono for labels/eyebrows
-- tabular lining numerals on every figure
-- accent `#B45309` for the caret only; semantic colors only where a number means something
-- reuse the existing `.tbl` / `.tbl-wrap` classes rather than new table styling
-- no emoji
-
-**Empty states**
-- No roster → row not expandable.
-- Roster present, Phase C not run → table renders with dollar columns dashed and a one-line note.
-
----
-
-## 6. Phase C — per-rep orders and CPO from VectorConnect
-
-### 6.1 Why the obvious approach is wrong
-
-The intuitive move is to query Team Sales with the date window set to each event's dates. The
-numbers kill it:
-
-| Season | Events | Sit alone on their dates | Overlap ≥1 other | Worst case |
-|---|---|---|---|---|
-| 2025 | 296 | 24 (8%) | **272 (92%)** | overlaps 43 others |
-| 2026 | 170 | 10 (6%) | **160 (94%)** | overlaps 47 others |
-
-An event-length window returns pooled CPO for up to 44 concurrent shows with no way to split it.
-
-### 6.2 Path C1 — Details drill-down (if Step 0 says yes)
-
-Export Event Sales per campaign, walk the Details store for every row, join to `data.json` on the
-**VC event ID already in `eventRaw`**. One report per campaign, no date reasoning at all.
-
-### 6.3 Path C2 — day-grain Team Sales join (if Step 0 says no)
-
-The constraint that makes this work: **a rep can only be at one show on a given day.**
-
-1. Query Team Sales one **day** at a time → rep × day CPO and orders.
-2. The Phase A roster says which event that rep was standing at that day.
-3. Join on rep + day → per-rep CPO and orders **per event**.
-
-Sizing: **513 distinct selling days** across 2025 + 2026 (305 + 208). Scripted and unattended.
-Drive the ExtJS components directly with the `__slice` runner pattern in
-`vectorconnect-coordinator-pay` — resolve components by `itemId`, never by remembered id, and echo
-the applied filter values back with every slice so a silently-unapplied filter can't produce
-plausible wrong numbers. Event type valueField is the code (`FAIR`, `IND`, `SERV`, `MALL`, `REAL`,
-`FDRL`, `TEAM`), division is the bare `'75'`.
-
-**Validate before the full run.** 24 days in 2025 had exactly one show running. Pick one, query
-that single day, and check the rep CPOs sum to that event's Event Sales total. If it ties, the
-method is proven for the cost of one query. If it doesn't, the likely cause is that Team Sales
-filters on *order-written* date rather than event date — diagnose that before spending an hour.
-
-**Known gaps to handle, not paper over:**
-- A rep at two shows in one day (rare, but the roster will show it) → flag, don't split evenly.
-- A rep with sales on a day the roster doesn't place them → unattributed bucket, reported.
-- Cross-division reps (Alan, Foss, Eli, Sean, Jeremy, Roman) work outside Rising Sun. For a
-  per-event join scoped to RSD shows, Division 75 is correct — but their day totals may include
-  outside sales, which is exactly why the single-show-day validation matters.
+The Mesa counter applies half-shift rules (Fri/Sun with 2 people = 0.5 each). That is a **pay** rule.
+`roster[].shifts` is raw rep-days — one rep, one day, one shift. Label them distinctly or someone
+will lose an afternoon reconciling numbers that were never meant to match.
 
 ---
 
@@ -288,23 +256,30 @@ filters on *order-written* date rather than event date — diagnose that before 
 
 | # | Step | Where | Blocks |
 |---|---|---|---|
-| 0 | Details probe | Chrome, Mac | C only |
-| 1 | Enumerate tabs, map to seasons | Sheets API, Mac | A |
-| 2 | Build parser + alias map, Alan confirms map | Mac | A |
-| 3 | Parse → `roster` on 2025 + 2026, validate vs `shifts` | Mac | B |
-| 4 | Drill-down UI, dollar columns dashed | repo | — |
+| ~~0~~ | ~~Details probe~~ | — | **Done — Summary by Rep confirmed** |
+| 1 | Capture the modal's network request | Chrome, Mac | 2 |
+| 2 | Loop it over event ids, per campaign; tie out each event | Mac | 3 |
+| 3 | Write `roster` into `data.json` for 2025 + 2026 | Mac | 4 |
+| 4 | Drill-down UI, shift columns dashed | repo | 5 |
 | 5 | Ship: commit `data.json` + `index.html`, push | repo | — |
-| 6 | Phase C per Step 0's answer, backfill `orders`/`cpo` | Mac | — |
-| 7 | Re-publish `data.json` | repo | — |
+| 6 | Backfill 2023 + 2024 (same script, wider window) | Mac | — |
+| 7 | Phase C overlay: shifts, CPO/shift, scheduled-but-sold-nothing | Mac | — |
 
-Steps 1–5 deliver a working "who worked this event" drill-down without VectorConnect at all.
+**Steps 1–5 deliver the feature as asked.** Everything after is upside.
 
-## 8. Open decisions
+---
 
-- **2023/2024 backfill?** Scoped to 2025 + 2026. The parser is season-agnostic, so adding them
-  later is a re-run, not a rewrite — if those tabs still exist.
-- **Do reps see each other's numbers?** The published `data.json` is world-readable to anyone with
-  the site. Per-rep CPO next to a rep's name is a different disclosure than a team total. Decide
-  before step 7, not after.
-- **Half-shift rules in the UI?** Roster shows raw rep-days. If the Mesa half-shift convention
-  should appear anywhere, it needs its own labelled column.
+## 8. Decide before step 5
+
+**Do reps see each other's numbers?** This is now the live question, not a footnote. The published
+`data.json` is readable by anyone with the site URL, and step 3 puts every rep's per-event CPO and
+order count into it. Adam Conroy's $473 average sitting next to Matt Foss's $1,260 at the same show
+is a different thing to publish than a team total. Options: publish as-is; publish rosters only to a
+gated build; show names to everyone but dollars only to the owner; or aggregate below a threshold.
+**Pick one before pushing, not after** — this is far easier to not-publish than to un-publish.
+
+**The other four Details icons.** One click each, sometime. Cheap to check, and one may be
+items-sold detail worth having.
+
+**2023/2024 now nearly free.** The original reason to skip them was shift-schedule coverage. VC
+covers them at 89% and 84%. Say the word and step 6 folds them in.
