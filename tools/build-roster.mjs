@@ -8,6 +8,11 @@
 //   names  rep names only -- cpo/orders/avg keys OMITTED
 //   full   names and dollars
 //
+// Publishing dollars takes two deliberate acts, never one. --level=full writes
+// roster.local.json, which is gitignored; it only becomes the published
+// roster.json if you also pass --publish. That way no single command, and no
+// "git add -A", can put per-rep CPO on a public site by accident.
+//
 // "names" deletes the keys rather than zeroing or nulling them. That is the
 // whole point: a client-side check that hides dollars still ships the dollars,
 // and anyone can curl the file. If the numbers are not in the artifact there is
@@ -24,6 +29,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const rawPath = args.find(a => !a.startsWith('--'));
 const level = (args.find(a => a.startsWith('--level=')) || '--level=off').split('=')[1];
+const publish = args.includes('--publish');
 
 if (!rawPath) {
   console.error('usage: node tools/build-roster.mjs <roster-raw.json> --level=off|names|full');
@@ -73,13 +79,20 @@ for (const [id, roster] of Object.entries(raw.events || {})) {
   repCount += roster.length;
 }
 
-const dest = join(root, 'roster.json');
-writeFileSync(dest, JSON.stringify(out));
-const kb = (Buffer.byteLength(JSON.stringify(out)) / 1024).toFixed(1);
+// Dollars land in a gitignored file unless publication is asked for outright.
+const name = (level === 'full' && !publish) ? 'roster.local.json' : 'roster.json';
+const body = JSON.stringify(out);
+writeFileSync(join(root, name), body);
+const kb = (Buffer.byteLength(body) / 1024).toFixed(1);
 
-console.log(`roster.json written at level=${level}`);
+console.log(`${name} written at level=${level}`);
 console.log(`  events ${Object.keys(out.events).length}  ·  rep rows ${repCount}  ·  ${kb} KB`);
-if (level === 'full') console.log('  NOTE: this file contains per-rep CPO and will be world-readable once pushed.');
+if (name === 'roster.local.json') {
+  console.log('  Gitignored — yours to read, not published. Re-run with --publish to');
+  console.log('  write roster.json instead, and read section 8 of the plan first.');
+} else if (level === 'full') {
+  console.log('  WARNING: per-rep CPO, and world-readable the moment this is pushed.');
+}
 if (problems.length) {
   console.log(`\n${problems.length} event(s) left out because they did not tie out:`);
   for (const p of problems.slice(0, 20)) console.log('  ' + p);

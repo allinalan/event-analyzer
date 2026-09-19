@@ -356,6 +356,20 @@ extends that existing split rather than inventing a new one.
 
 **Default to `off`.** A default is the decision most buyers never revisit.
 
+### 8.2a Publishing dollars takes two deliberate acts
+
+Gating the build is not enough on its own, because the working files route around it:
+
+- `roster-raw.json` — what the browser step downloads — holds **every rep's CPO whatever level you
+  later build at.** One `git add -A` publishes it and `--level=names` was for nothing.
+- Building at `full` to look at the numbers yourself leaves a publishable file sitting in the repo.
+
+So: `roster-raw.json`, `roster-targets.json` and `roster.local.json` are all **gitignored**, and
+`--level=full` writes `roster.local.json` — not `roster.json` — unless you also pass `--publish`.
+
+No single command, and no `git add -A`, can put per-rep CPO on a public site. It takes typing
+`--publish`, which is a thing you do on purpose.
+
 ### 8.3 If a buyer wants the full roster visible to their team
 
 That needs server-side auth, not a flag. Put the site behind something like Cloudflare Access

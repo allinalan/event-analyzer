@@ -1,3 +1,10 @@
 # Local preview/dev tooling — not part of the published site
 server.js
 .claude/
+
+# Roster pull working files. roster-raw.json holds every rep's CPO whatever
+# level you later build at, so it must never reach a public repo -- committing
+# it would defeat the whole point of building at --level=names.
+roster-targets.json
+roster-raw.json
+roster.local.json
