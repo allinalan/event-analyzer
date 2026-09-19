@@ -225,6 +225,20 @@ would give rep × day × event. Worth one probe; not needed for this build.
 Shifts and CPO/shift render as `—` until Phase C. Em-dash, never `$0` — same rule as the RSD
 dashboard.
 
+**Service events need their own way in.** Added 2026-09-19. By Event deliberately keeps service
+events out of the name-matched rows — they are blitzes whose months and venues move — and sends
+them to `renderServiceVolume`, a one-row-per-month volume table. That table has no per-event rows,
+so 88 of the published rosters (23%) had nothing to hang a caret on and were unreachable. A month
+row now expands instead, listing that month's service events with the reps who wrote orders at
+each: `Event · Year · Rep · Orders · CPO · Avg order`, newest season first, name and year shown
+once per event group. One level of expansion only — a service event has two reps at the median, so
+a second click per event would be friction for nothing. Months whose events all lack a roster get
+the inert spacer, and an event with no roster gets one muted "no roster published" row rather than
+being dropped, so the month's event count still reconciles.
+
+Note the like-for-like rule still applies: comparing 2025 → 2026 hides Sep–Dec 2025, because 2026
+has not reached those months. A December service event is reachable by comparing 2024 → 2025.
+
 **Design system** — `docs/history/event-analyzer-design.md`, don't bulldoze it: Fraunces for the
 panel heading, Geist for the table, Geist Mono for labels; tabular lining numerals on every figure;
 accent `#B45309` on the caret only; semantic colors only where a number means something; reuse

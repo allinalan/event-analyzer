@@ -672,6 +672,14 @@ nav.topnav{
 .rp-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
 .rp-title{font-family:var(--disp);font-weight:600;font-size:12.5px;color:var(--ink);}
 .rp-meta{font-family:var(--mono);font-size:9.5px;color:var(--faded);text-transform:uppercase;letter-spacing:.04em;}
+.rp-tbl-wide{max-width:860px;}
+/* Service-event names are long ("Febalcasa Scottsdale Service & Sales Event"). Left
+   on one line they shove Rep -- the column people actually came for -- off a phone
+   screen, so cap and wrap the name instead. Continuation rows of a group carry a
+   hairline so a blank name cell reads as "same event", not "empty row". */
+.rp-tbl-wide td:first-child{white-space:normal;line-height:1.35;}
+.rp-ev{display:inline-block;max-width:200px;}
+.rp-tbl-wide tbody tr td:first-child:empty{border-left:2px solid var(--line);}
 .rp-tbl{width:100%;max-width:620px;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums lining-nums;}
 .rp-tbl th{
   font-family:var(--mono);font-size:9.5px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;
@@ -682,6 +690,8 @@ nav.topnav{
 .rp-tbl tr:last-child td{border-bottom:none;}
 .rp-tbl th:last-child, .rp-tbl td:last-child{padding-right:0;}
 @media (max-width:640px){
+  .rp-ev{max-width:118px;}
+  .rp-tbl-wide{width:auto;}   /* size to content so the figures sit closer to the names */
   .tbl tr.roster-row > td{padding-left:10px;}
   .roster-panel{padding-right:10px;}
   .rp-tbl{font-size:11.5px;}
@@ -1541,6 +1551,7 @@ const STATE = {
   territories: null,          // territory definitions from data.json (null = DEFAULT_TERRITORIES)
   evTerritory: 'all',         // By Event territory chip: 'all' | territory id | 'none'
   rosterOpen: new Set(),      // By Event rows expanded to show their rep roster, keyed on eventRaw
+  svcOpen: new Set(),         // Service Events: month rows expanded to their per-event rosters
 };
 
 // ============================================
@@ -4374,6 +4385,51 @@ function renderMovedTable(rows){
 }
 
 // Service events month by month: how many ran and what they made, both seasons.
+// Service events are compared by volume, one row per month, so they never get the
+// per-event rows the rest of By Event has -- and their rosters would be unreachable.
+// Expanding a month lists that month's events with the reps who wrote orders at each,
+// newest season first. One level of expansion only: a service event has 2 reps at the
+// median, so a second click per event would be friction for nothing.
+function serviceRosterPanel(monthEvents, cols){
+  const dollars = rosterHasDollars();
+  const dash = '<span class="dim">\u2014</span>';
+  let body = '', withRoster = 0;
+  for (const ev of monthEvents){
+    const reps = mergeReps((ROSTER && ROSTER.events[ev.eventRaw]) || []);
+    if (!reps.length){
+      body += `<tr><td><span class="rp-ev">${escapeHtml(ev.eventDisplay)}</span></td><td>${ev.year}</td>` +
+              `<td colspan="4" class="dim">no roster published</td></tr>`;
+      continue;
+    }
+    withRoster++;
+    reps.forEach((p, i) => {
+      body += `<tr>
+        <td>${i === 0 ? `<span class="rp-ev">${escapeHtml(ev.eventDisplay)}</span>` : ''}</td>
+        <td>${i === 0 ? ev.year : ''}</td>
+        <td>${escapeHtml(p.rep)}</td>
+        <td class="r">${dollars ? fmtN(p.orders) : dash}</td>
+        <td class="r">${dollars ? fmt$(p.cpo) : dash}</td>
+        <td class="r">${dollars && p.avg != null ? fmt$(p.avg) : dash}</td>
+      </tr>`;
+    });
+  }
+  return `<tr class="roster-row"><td colspan="${cols}">
+    <div class="roster-panel">
+      <div class="rp-head">
+        <span class="rp-title">Reps who wrote orders</span>
+        <span class="rp-meta">${monthEvents.length} event${monthEvents.length === 1 ? '' : 's'} \u00b7 ${withRoster} with a roster${dollars ? '' : ' \u00b7 names only'}</span>
+      </div>
+      <table class="rp-tbl rp-tbl-wide">
+        <thead><tr>
+          <th>Event</th><th>Year</th><th>Rep</th>
+          <th class="r">Orders</th><th class="r">CPO</th><th class="r">Avg order</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  </td></tr>`;
+}
+
 function renderServiceVolume(svcA, svcB, lastMonth){
   const yA = STATE.evYearA, yB = STATE.evYearB;
   const sum = arr => arr.reduce((a, e) => a + e.total, 0);
@@ -4381,16 +4437,27 @@ function renderServiceVolume(svcA, svcB, lastMonth){
   let html = `<thead><tr><th>Month</th><th class="r">${yA} events</th><th class="r">${yB} events</th><th class="r">Δ events</th><th class="r">${yA} CPO</th><th class="r">${yB} CPO</th><th class="r">Δ CPO</th><th class="r">${yA} avg</th><th class="r">${yB} avg</th></tr></thead><tbody>`;
   const months = [...new Set([...svcA, ...svcB].map(e => e.month))].sort((a, b) => a - b);
   if (!months.length) html += `<tr><td colspan="9" style="text-align:center;padding:34px 20px;color:var(--mut);">No service events in this scope.</td></tr>`;
+  const SVC_COLS = 9;                        // keep in step with the thead above
   for (const mo of months) {
     const a = svcA.filter(e => e.month === mo), b = svcB.filter(e => e.month === mo);
     const dn = b.length - a.length, dc = sum(b) - sum(a);
     const reached = mo <= lastMonth;
-    html += `<tr${reached ? '' : ' style="color:var(--faded);"'}><td class="cat">${MONTH_NAMES[mo]}${reached ? '' : ' <span class="dim" style="font-size:10.5px;">not reached yet</span>'}</td>
+    // Newest season first; a month only gets a caret if something in it has a roster.
+    const byName = (x, y) => (x.eventDisplay || '').localeCompare(y.eventDisplay || '');
+    const monthEvents = [...b].sort(byName).concat([...a].sort(byName));
+    const anyRoster = !!ROSTER && monthEvents.some(e => (ROSTER.events[e.eventRaw] || []).length);
+    const svcKey = 'svc:' + mo;
+    const svcOpenNow = anyRoster && STATE.svcOpen.has(svcKey);
+    const svcCaret = anyRoster
+      ? `<span class="ev-caret${svcOpenNow ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${svcOpenNow}" data-svc="${svcKey}" aria-label="${svcOpenNow ? 'Hide' : 'Show'} the reps who worked ${MONTH_NAMES[mo]} service events">\u25b8</span>`
+      : '<span class="ev-caret-sp"></span>';
+    html += `<tr${reached ? '' : ' style="color:var(--faded);"'}><td class="cat">${svcCaret}${MONTH_NAMES[mo]}${reached ? '' : ' <span class="dim" style="font-size:10.5px;">not reached yet</span>'}</td>
       <td class="r">${a.length}</td><td class="r">${reached ? b.length : '<span class="dim">—</span>'}</td>
       <td class="r ${reached ? deltaClass(dn) : ''}">${reached ? `${deltaArrow(dn)} ${fmtDeltaN(dn)}` : '<span class="dim">—</span>'}</td>
       <td class="r">${fmt$(sum(a))}</td><td class="r">${reached ? fmt$(sum(b)) : '<span class="dim">—</span>'}</td>
       <td class="r ${reached ? deltaClass(dc) : ''}">${reached ? `${deltaArrow(dc)} ${fmtDelta$(dc)}` : '<span class="dim">—</span>'}</td>
       <td class="r">${a.length ? fmt$(avg(a)) : '<span class="dim">—</span>'}</td><td class="r">${reached && b.length ? fmt$(avg(b)) : '<span class="dim">—</span>'}</td></tr>`;
+    if (svcOpenNow) html += serviceRosterPanel(monthEvents, SVC_COLS);
   }
   const dn = svcB.length - svcA.length, dc = sum(svcB) - sum(svcA);
   html += `<tr class="total"><td class="cat">Like-for-like${lastMonth < 11 ? ` (through ${MONTH_NAMES[lastMonth]})` : ''}</td>
@@ -4401,6 +4468,17 @@ function renderServiceVolume(svcA, svcB, lastMonth){
   html += `</tbody>`;
   const tblEl = document.getElementById('evTable');
   tblEl.innerHTML = html;
+  tblEl.querySelectorAll('.ev-caret[data-svc]').forEach(el => {
+    const toggle = () => {
+      const k = el.dataset.svc;
+      if (STATE.svcOpen.has(k)) STATE.svcOpen.delete(k); else STATE.svcOpen.add(k);
+      renderEvent();
+    };
+    el.addEventListener('click', toggle);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar'){ e.preventDefault(); toggle(); }
+    });
+  });
   fixTableOverflow();
 }
 
