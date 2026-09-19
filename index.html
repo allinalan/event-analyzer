@@ -649,6 +649,45 @@ nav.topnav{
 .tbl-wrap.is-scrollx .tbl th{top:0;}
 .dim{color:var(--faded);}
 
+/* ---- Rep roster drill-down (By Event) -------------------------------------
+   A row whose event has a published roster gets a caret; clicking it opens a
+   panel of the reps who wrote orders there. Rows with no roster get a spacer,
+   never a caret, so there is no affordance that does nothing. */
+.ev-caret{
+  display:inline-block;width:13px;margin-right:4px;cursor:pointer;
+  color:var(--ember);font-size:10px;line-height:1;
+  transition:transform .12s ease;transform:rotate(0deg);transform-origin:50% 50%;
+  user-select:none;
+}
+.ev-caret.open{transform:rotate(90deg);}
+.ev-caret:focus-visible{outline:2px solid var(--ember);outline-offset:2px;border-radius:3px;}
+.ev-caret-sp{display:inline-block;width:13px;margin-right:4px;}
+.ev-lead{white-space:nowrap;}   /* caret + rank stay on one line; the name wraps */
+.tbl tr.roster-row:hover{background:transparent;}
+.tbl tr.roster-row > td{
+  background:var(--surface-2);border-bottom:1px solid var(--line);
+  padding:0 0 0 17px;
+}
+.roster-panel{padding:12px 14px 13px 0;}
+.rp-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+.rp-title{font-family:var(--disp);font-weight:600;font-size:12.5px;color:var(--ink);}
+.rp-meta{font-family:var(--mono);font-size:9.5px;color:var(--faded);text-transform:uppercase;letter-spacing:.04em;}
+.rp-tbl{width:100%;max-width:620px;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums lining-nums;}
+.rp-tbl th{
+  font-family:var(--mono);font-size:9.5px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--faded);text-align:left;padding:0 10px 5px 0;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+.rp-tbl th.r, .rp-tbl td.r{text-align:right;}
+.rp-tbl td{padding:4px 10px 4px 0;color:var(--ink-2);border-bottom:1px solid var(--line);white-space:nowrap;}
+.rp-tbl tr:last-child td{border-bottom:none;}
+.rp-tbl th:last-child, .rp-tbl td:last-child{padding-right:0;}
+@media (max-width:640px){
+  .tbl tr.roster-row > td{padding-left:10px;}
+  .roster-panel{padding-right:10px;}
+  .rp-tbl{font-size:11.5px;}
+  .rp-tbl th, .rp-tbl td{padding-right:7px;}
+}
+
 /* Delta cells: colored text + arrow, no cell floods */
 .tbl td.r.delta-up{color:var(--pos);font-weight:600;}
 .tbl td.r.delta-dn{color:var(--neg);font-weight:600;}
@@ -1501,6 +1540,7 @@ const STATE = {
   editedEventKeys: new Set(), // tracks which events have been manually re-ranked
   territories: null,          // territory definitions from data.json (null = DEFAULT_TERRITORIES)
   evTerritory: 'all',         // By Event territory chip: 'all' | territory id | 'none'
+  rosterOpen: new Set(),      // By Event rows expanded to show their rep roster, keyed on eventRaw
 };
 
 // ============================================
@@ -3917,7 +3957,98 @@ const EV_TABS = [
   {key:'moved',    lbl:'Moved later'},
 ];
 
+// ---- Rep roster ------------------------------------------------------------
+// roster.json is published beside data.json and holds, per event, the reps who
+// wrote orders there. It is built at an exposure level (off | names | full);
+// at "names" the cpo/orders/avg keys are absent from the file entirely, so the
+// dollar columns render as an em-dash rather than a misleading $0.
+//
+// Fetched the first time By Event renders rather than at page boot: a visitor
+// who never opens the tab never downloads it. It cannot be deferred until a row
+// is actually clicked, because which rows get a caret is only knowable once the
+// file is in hand -- and a caret that turns out to open nothing is exactly the
+// dead affordance the spec rules out.
+let ROSTER = null;              // { level, pulledAt, events } once loaded
+let ROSTER_LOAD = null;         // in-flight/settled promise; also the "tried" flag
+
+function loadRoster(){
+  if (ROSTER_LOAD) return ROSTER_LOAD;
+  ROSTER_LOAD = fetch('./roster.json', {cache:'no-store'})
+    .then(r => r.ok ? r.json() : null)
+    .then(obj => { ROSTER = (obj && obj.events) ? obj : null; return ROSTER; })
+    .catch(() => { ROSTER = null; return null; });   // no file = level "off", not an error
+  return ROSTER_LOAD;
+}
+
+const rosterHasDollars = () => !!(ROSTER && ROSTER.level === 'full');
+
+// One row can cover several events (a show that ran twice in a month groups
+// together), so their rep rows are unioned and a rep appearing in more than one
+// is summed. Average is recomputed from the merged figures rather than averaged.
+function mergeReps(rows){
+  const dollars = rosterHasDollars();
+  const by = new Map();
+  for (const r of rows){
+    let cur = by.get(r.rep);
+    if (!cur){ cur = {rep:r.rep, cpo:0, orders:0}; by.set(r.rep, cur); }
+    if (dollars){ cur.cpo += (r.cpo || 0); cur.orders += (r.orders || 0); }
+  }
+  const out = [...by.values()].map(r => dollars
+    ? {rep:r.rep, cpo:r.cpo, orders:r.orders, avg: r.orders ? Math.round(r.cpo / r.orders) : null}
+    : {rep:r.rep, cpo:null, orders:null, avg:null});
+  out.sort((x, y) => dollars ? (y.cpo - x.cpo) || x.rep.localeCompare(y.rep) : x.rep.localeCompare(y.rep));
+  return out;
+}
+
+// A By Event row compares two seasons, while a roster belongs to one event. Show
+// the newer season's roster, falling back to the older one so "Didn't return"
+// rows (which have no B side) still open.
+function rosterFor(r){
+  if (!ROSTER || !ROSTER.events) return null;
+  const pick = (list, yr) => {
+    if (!Array.isArray(list) || !list.length) return null;
+    const rows = []; let key = null;
+    for (const e of list){
+      const rs = ROSTER.events[e.eventRaw];
+      if (rs && rs.length){ if (!key) key = e.eventRaw; rows.push(...rs); }
+    }
+    return rows.length ? {key, year:yr, reps:mergeReps(rows)} : null;
+  };
+  return pick(r.evsB, STATE.evYearB) || pick(r.evsA, STATE.evYearA);
+}
+
+function rosterPanelHtml(rst, cols){
+  const dollars = rosterHasDollars();
+  const dash = '<span class="dim">\u2014</span>';
+  const body = rst.reps.map(p => `<tr>
+        <td>${escapeHtml(p.rep)}</td>
+        <td class="r">${dollars ? fmtN(p.orders) : dash}</td>
+        <td class="r">${dollars ? fmt$(p.cpo) : dash}</td>
+        <td class="r">${dollars && p.avg != null ? fmt$(p.avg) : dash}</td>
+        <td class="r">${dash}</td>
+        <td class="r">${dash}</td>
+      </tr>`).join('');
+  return `<tr class="roster-row"><td colspan="${cols}">
+    <div class="roster-panel">
+      <div class="rp-head">
+        <span class="rp-title">Reps who wrote orders</span>
+        <span class="rp-meta">${rst.year} \u00b7 ${rst.reps.length} rep${rst.reps.length === 1 ? '' : 's'}${dollars ? '' : ' \u00b7 names only'}</span>
+      </div>
+      <table class="rp-tbl">
+        <thead><tr>
+          <th>Rep</th><th class="r">Orders</th><th class="r">CPO</th>
+          <th class="r">Avg order</th><th class="r">Shifts</th><th class="r">CPO/shift</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  </td></tr>`;
+}
+
 function renderEvent(){
+  // First visit to this tab pulls roster.json in, then redraws once so the
+  // carets appear. The guard is set synchronously, so this cannot loop.
+  if (!ROSTER_LOAD) loadRoster().then(() => renderEvent());
   const yrs = STATE.years;
   const yA = document.getElementById('evYearA');
   const yB = document.getElementById('evYearB');
@@ -4026,6 +4157,7 @@ function renderEvent(){
       name: b.eventDisplay || a.eventDisplay,
       cat: b.category || a.category,
       tev: gEv(b) || gEv(a),
+      evsA: a.events, evsB: b.events,
       month: b.month,
       monthA: a.month,
       vA: a.total, vB: b.total,
@@ -4040,6 +4172,7 @@ function renderEvent(){
       const back = priorRunning(o.eventNorm, STATE.evYearA, o.addedDate ? o.month : null);
       return {
         name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month,
+        evsB: o.events,
         dateOnly: o.addedDate && !back, backFrom: back,
         vA: 0, vB: o.total, oA: 0, oB: o.orders, diff: o.total, pct: null
       };
@@ -4047,6 +4180,7 @@ function renderEvent(){
   } else if (tab === 'lost') {
     rows = m.lostOnes.map(o => ({
       name: o.eventDisplay, cat: o.category, tev: gEv(o), month: o.month, dateOnly: o.droppedDate,
+      evsA: o.events,
       vA: o.total, vB: 0, oA: o.orders, oB: 0, diff: -o.total, pct: -1
     }));
   }
@@ -4101,11 +4235,20 @@ function renderEvent(){
     </td></tr>`;
   }
   let rank = 0;
+  const EV_COLS = 10;                       // keep in step with the thead above
   for (const r of rows) {
     rank++;
     const dCls = deltaClass(r.diff);
+    // Only a row whose event actually has a published roster gets a caret; the
+    // rest get an inert spacer so the names stay aligned.
+    const rst = rosterFor(r);
+    const rk = rst ? rst.key : null;
+    const rOpen = !!(rk && STATE.rosterOpen.has(rk));
+    const caret = rk
+      ? `<span class="ev-caret${rOpen ? ' open' : ''}" role="button" tabindex="0" aria-expanded="${rOpen}" data-rk="${escapeHtml(rk)}" aria-label="${rOpen ? 'Hide' : 'Show'} the reps who worked ${escapeHtml(r.name)}">\u25b8</span>`
+      : '<span class="ev-caret-sp"></span>';
     html += `<tr>
-      <td class="cat"><span style="font-family:var(--mono);font-size:9.5px;color:var(--faded);margin-right:8px;">${String(rank).padStart(2,'0')}</span>${escapeHtml(r.name)}${
+      <td class="cat"><span class="ev-lead">${caret}<span style="font-family:var(--mono);font-size:9.5px;color:var(--faded);margin-right:8px;">${String(rank).padStart(2,'0')}</span></span>${escapeHtml(r.name)}${
         r.backFrom ? ` <span class="badge bb" title="last ran in ${r.backFrom.year} (${r.backFrom.months.map(x => MONTH_NAMES[x]).join(', ')}); not in ${STATE.evYearA}, so it is back rather than new">back from ${r.backFrom.year}</span>`
         : r.dateOnly ? ` <span class="badge by" title="this show runs in both seasons; it is an extra or missing date, not a new or lost show">${tab === 'new' ? 'added' : 'dropped'} date</span>` : ''
       }</td>
@@ -4123,10 +4266,24 @@ function renderEvent(){
       <td class="r">${r.oB ? fmtN(r.oB) : '<span class="dim">—</span>'}</td>
       ${absDeltaCell(r.oB - r.oA, fmtDeltaN, (r.oA||0)===0 && (r.oB||0)===0)}
     </tr>`;
+    if (rOpen) html += rosterPanelHtml(rst, EV_COLS);
   }
   html += `</tbody>`;
   const tblEl = document.getElementById('evTable');
   tblEl.innerHTML = html;
+  // Roster carets: click or Enter/Space toggles the panel. Expansion lives in
+  // STATE keyed on eventRaw, so sorting or filtering the table does not collapse it.
+  tblEl.querySelectorAll('.ev-caret').forEach(el => {
+    const toggle = () => {
+      const k = el.dataset.rk;
+      if (STATE.rosterOpen.has(k)) STATE.rosterOpen.delete(k); else STATE.rosterOpen.add(k);
+      renderEvent();
+    };
+    el.addEventListener('click', toggle);
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar'){ e.preventDefault(); toggle(); }
+    });
+  });
   // Clickable header sorting (keeps the dropdown in sync)
   fixTableOverflow();
   tblEl.querySelectorAll('th[data-sort]').forEach(th => th.addEventListener('click', () => {
