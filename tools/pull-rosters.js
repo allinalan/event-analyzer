@@ -19,7 +19,14 @@
 //   3. Paste this file, then:  await pullRosters()
 //   4. It downloads roster-raw.json when it finishes.
 //
-// Re-running is safe -- it is all reads.
+// Results accumulate on window.__ROSTER_OUT and anything already pulled is
+// skipped, so this is both resumable and chunkable:
+//   - session bounced at event 300? Log back in, run the same call again --
+//     it picks up the 87 it has not got rather than starting over.
+//   - injecting 387 targets in one go is awkward? Call it per chunk with
+//     { download: false }, then once with { download: true } at the end.
+//
+// Re-running is always safe -- it is all reads.
 
 (() => {
   'use strict';
@@ -60,7 +67,8 @@
     }));
   }
 
-  async function pullRosters(targets = window.__TARGETS) {
+  async function pullRosters(targets = window.__TARGETS, opts = {}) {
+    const { download = true } = opts;
     if (!Array.isArray(targets) || !targets.length) {
       console.error('Set window.__TARGETS first — see the header of this file.');
       return;
@@ -69,10 +77,18 @@
       console.warn('Ext is undefined — if this is the login page, log in and re-run.');
     }
 
-    const out = { pulledAt: new Date().toISOString(), events: {}, tieOut: {} };
+    // Accumulate across calls so a chunked run, or a re-run after the session
+    // bounced, adds to what is already here instead of starting from nothing.
+    const out = window.__ROSTER_OUT = window.__ROSTER_OUT ||
+      { pulledAt: new Date().toISOString(), events: {}, tieOut: {} };
     const failed = [];
     const mismatched = [];
     const t0 = Date.now();
+
+    const todo = targets.filter(t => !(t.id in out.events));
+    const already = targets.length - todo.length;
+    if (already) console.log(`${already} already pulled — doing the remaining ${todo.length}.`);
+    targets = todo;
 
     for (let i = 0; i < targets.length; i++) {
       const t = targets[i];
@@ -102,31 +118,49 @@
       await sleep(DELAY_MS);
     }
 
-    out.failed = failed;
-    out.mismatched = mismatched;
+    // Keep only the failures that are still failures: one that succeeded on a
+    // later pass should not linger in the report.
+    out.failed = [...(out.failed || []).filter(f => !(f.id in out.events)), ...failed];
+    out.mismatched = [...(out.mismatched || []).filter(m => out.tieOut[m.id] === false), ...mismatched];
 
     const pulled = Object.keys(out.events).length;
     const tied = Object.values(out.tieOut).filter(Boolean).length;
     console.log(
       `\nDone in ${Math.round((Date.now() - t0) / 1000)}s\n` +
-      `  pulled     ${pulled}/${targets.length}\n` +
+      `  pulled     ${pulled} events held in total\n` +
       `  tied out   ${tied}/${pulled}\n` +
-      `  mismatched ${mismatched.length}\n` +
-      `  failed     ${failed.length}`
+      `  mismatched ${out.mismatched.length}\n` +
+      `  failed     ${out.failed.length}`
     );
-    if (mismatched.length) console.table(mismatched.slice(0, 20));
-    if (failed.length) console.table(failed.slice(0, 20));
+    if (out.mismatched.length) console.table(out.mismatched.slice(0, 20));
+    if (out.failed.length) console.table(out.failed.slice(0, 20));
 
+    if (!download) {
+      console.log('  (download skipped — call pullRosters(rest) again, or dumpRosters())');
+      return out;
+    }
+    downloadRosters();
+    return out;
+  }
+
+  // Write whatever has accumulated so far to roster-raw.json. Safe to call at
+  // any point -- after a chunked run, or to salvage a partial pull.
+  function downloadRosters() {
+    const out = window.__ROSTER_OUT;
+    if (!out || !Object.keys(out.events || {}).length) {
+      console.error('Nothing pulled yet — run pullRosters() first.');
+      return;
+    }
     const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'roster-raw.json';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(a.href);
-
-    return out;
+    console.log(`roster-raw.json downloaded — ${Object.keys(out.events).length} events.`);
   }
 
   window.pullRosters = pullRosters;
+  window.dumpRosters = downloadRosters;
   console.log('pullRosters() ready — set window.__TARGETS, then: await pullRosters()');
 })();
