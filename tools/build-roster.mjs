@@ -19,7 +19,9 @@
 // nothing to leak.
 //
 // Re-validates every event against data.json rather than trusting the browser
-// step's own tie-out, so a hand-edited raw file cannot slip through.
+// step's own tie-out, so a hand-edited raw file cannot slip through. The CPO
+// compare allows n * $0.50 for per-rep rounding (see the tie-out below); orders
+// must match exactly.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +65,21 @@ for (const [id, roster] of Object.entries(raw.events || {})) {
 
   const sumCpo = roster.reduce((a, r) => a + r.cpo, 0);
   const sumOrd = roster.reduce((a, r) => a + r.orders, 0);
-  if (sumCpo !== ev.total || sumOrd !== ev.orders) {
+  // pull-rosters.js rounds each rep's CPO to a whole dollar, so a roster of n reps
+  // sums to a whole dollar too -- while data.json legitimately carries cents
+  // ($51,733.50). An exact compare can therefore never match those events, and
+  // rejected 29 of them the first time VectorConnect handed back cent-level totals.
+  // A rounded rep is off by at most $0.50, so n reps are off by at most n * $0.50;
+  // anything inside that is arithmetic, not disagreement. Orders are integers on
+  // both sides and still have to match exactly.
+  //
+  // The tolerance stays tight on purpose. What this guard exists to catch -- a
+  // truncated page, a re-ranked event, orders booked to the wrong show -- runs to
+  // thousands of dollars (the two Maricopa shows traded $16,797), four orders of
+  // magnitude outside it. The alternative root fix is to stop rounding in
+  // pull-rosters.js, but that invalidates every roster already pulled.
+  const cpoTolerance = roster.length * 0.5 + 1e-9;
+  if (Math.abs(sumCpo - ev.total) > cpoTolerance || sumOrd !== ev.orders) {
     problems.push(
       `${id} ${ev.eventDisplay}: rows sum to $${sumCpo}/${sumOrd} ord, ` +
       `data.json says $${ev.total}/${ev.orders} ord`

@@ -170,6 +170,18 @@ Step 2 ties each event out as it lands: the rep rows must sum to the `total` and
 stored for that event. Step 3 re-validates against `data.json` independently and **refuses to
 publish any event that does not tie out**, so a truncated or hand-edited pull cannot reach the site.
 
+**The CPO compare allows `n * $0.50` for n reps; orders must match exactly.** Revised 2026-09-19.
+`pull-rosters.js` rounds each rep's CPO to a whole dollar, so a roster always sums to a whole
+dollar — while `data.json` legitimately carries cents once a campaign is pulled from
+VectorConnect (`$51,733.50`). An exact compare can never match those events. It cost 29 of them
+the first time it met cent-level totals, and it was also why Oro Valley Spring Festival
+(`$4,872.75`, the one event that already stored cents) was withheld on day one. A rounded rep is
+off by at most $0.50, so n reps are off by at most `n * $0.50`; inside that is arithmetic, not
+disagreement. The tolerance stays tight deliberately — the failures this guard exists to catch run
+to thousands (the two Maricopa shows traded $16,797), four orders of magnitude outside it. The
+alternative root fix is to stop rounding in `pull-rosters.js`, at the cost of invalidating every
+roster already pulled.
+
 Verified end to end against the real Maricopa response: the seven reps tie to $87,061 / 102 orders
 and publish; a deliberately truncated roster and an unknown event id are both rejected; and at
 `--level=names` neither the string `"cpo"` nor the value `6626` appears anywhere in the output file.
