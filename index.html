@@ -1153,6 +1153,15 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
    and long event names are capped instead of forcing the table wider than its column. */
 #layersPage .tbl th{position:static;}
 #layersPage .tbl td .ly-name{display:inline-block;max-width:280px;vertical-align:bottom;}
+/* Series (Maricopa): two-line cells, this season on top and the comparison under it */
+.sr-v{font-family:var(--mono);font-weight:600;color:var(--ink);white-space:nowrap;}
+.sr-sub{display:block;font-family:var(--mono);font-size:10.5px;color:var(--mut);margin-top:2px;white-space:nowrap;}
+.sr-sub .delta-up{color:var(--pos);} .sr-sub .delta-dn{color:var(--neg);}
+.sr-show{font-weight:600;color:var(--ink);white-space:nowrap;}
+.sr-wait{font-size:12px;color:var(--mut);font-style:italic;}
+#layersPage .tbl th.sr-cur,#layersPage .tbl td.sr-cur{background:var(--surface-2);}
+#layersPage .tbl th.sr-cur{color:var(--series-primary);}
+#layersPage .tbl th.sr-bench{color:var(--ink-2);}
 </style>
 </head>
 <body>
@@ -1361,7 +1370,7 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   <header class="page-head">
     <div class="eyebrow">Layers</div>
     <h1 class="ptitle" id="lyTitle">Layers</h1>
-    <p class="psub" id="lySub">The five layers underneath the season total: what moved it, how hard each shift worked, where the dollars came from, how much rides on the biggest events, and how each territory is doing.</p>
+    <p class="psub" id="lySub">The layers underneath the season total: what moved it, how hard each shift worked, where the dollars came from, how much rides on the biggest events, how each territory is doing, and the Maricopa home shows year by year and show by show.</p>
   </header>
   <div id="lyScopeBar"></div>
   <div class="panel">
@@ -1383,6 +1392,10 @@ th.sortable.sorted .s-ind{opacity:1;color:var(--ember);}
   <div class="panel" id="terrPanel">
     <div class="phead"><div><span class="ptit2-eyebrow">Territories</span><div class="ptit2" id="terrTitle">Territories <span class="ptit2-sub">— every event keeps its ranking and is also tagged with the territory it ran in</span></div></div></div>
     <div id="terrBody"></div>
+  </div>
+  <div class="panel" id="seriesPanel">
+    <div class="phead"><div><span class="ptit2-eyebrow">Maricopa</span><div class="ptit2" id="seriesTitle">Maricopa Home Shows <span class="ptit2-sub">— every show matched to the same show in other years by when it runs, not by its name</span></div></div></div>
+    <div id="seriesBody"></div>
   </div>
 </div>
 
@@ -1515,6 +1528,10 @@ const CAT_ORDER = ['Elite','Key','Traditional','Mesa Marketplace','Service Event
 // published data.json carries the definitions (payload.territories, written from the
 // automation's config.json); this default keeps older files working.
 const DEFAULT_TERRITORIES = [{id:'el-paso', label:'El Paso Territory', short:'El Paso', note:'El Paso, TX and New Mexico'}];
+// Series: shows read together on the Layers page, each matched to the same show in other years
+// by its slot (the part of the year it runs in), not its name. data.json carries the definitions
+// (payload.series, from the automation's config.json → series); this copy keeps older files working.
+const DEFAULT_SERIES = [{"id":"maricopa","label":"Maricopa Home Shows","short":"Maricopa","note":"The spring show was the Home & Garden Show through 2024 and the Home & Flower Show from 2025; it is one show here. The Maricopa County Fair is not part of the series.","nameRules":[{"pattern":"^maricopa county\\b.*\\b(home|landscape|garden|flower)\\b"}],"eventIds":[],"excludeEventIds":[],"slots":[{"id":"jan","label":"January","show":"Home & Garden","months":[0]},{"id":"late-winter","label":"Feb–Mar","show":"Home & Landscape","months":[1,2]},{"id":"spring","label":"Apr–May","show":"Home & Flower","months":[3,4]},{"id":"summer","label":"July","show":"Summer Home & Landscape","months":[5,6,7]},{"id":"fall","label":"Sep–Oct","show":"Fall Home & Garden","months":[8,9,10,11]}],"schedule":{"pattern":"^maricopa\\b","exclude":["fair"]}}];
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MONTH_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const CAMPAIGNS = [
@@ -1549,6 +1566,8 @@ const STATE = {
   rerankYearFilter: 'all',
   editedEventKeys: new Set(), // tracks which events have been manually re-ranked
   territories: null,          // territory definitions from data.json (null = DEFAULT_TERRITORIES)
+  series: null,               // series definitions from data.json (null = DEFAULT_SERIES)
+  srMetric: 'cpo',            // Layers → series grid: which number each show × year cell shows
   evTerritory: 'all',         // By Event territory chip: 'all' | territory id | 'none'
   rosterOpen: new Set(),      // By Event rows expanded to show their rep roster, keyed on eventRaw
   svcOpen: new Set(),         // Service Events: month rows expanded to their per-event rosters
@@ -1993,7 +2012,43 @@ function priorRunning(eventNorm, beforeYear, nearMonth){
 // the same year); a jump of a whole season is a different date, not a move.
 const MONTH_DRIFT = 2;
 
-// Match one season's events against another's, by name.
+// ---- Series membership (payload.series; the automation's lib/series.js applies the same rules)
+function seriesList(){ return (STATE.series && STATE.series.length) ? STATE.series : DEFAULT_SERIES; }
+const eventIdOf = e => (String(e.eventRaw || '').match(/^\s*([A-Za-z]{0,2}\d{1,10})\s*[\-–—]/) || [])[1] || null;
+function seriesMember(e, s){
+  const id = eventIdOf(e);
+  const hit = ids => (ids || []).some(x => String(x.eventId) === String(id) && (x.year == null || Number(x.year) === Number(e.year)));
+  if (hit(s.excludeEventIds)) return false;
+  if (hit(s.eventIds)) return true;
+  const norm = e.eventNorm || '', padded = ` ${norm} `;
+  for (const r of s.nameRules || []) {
+    if (r.pattern) { try { if (new RegExp(r.pattern, 'i').test(norm)) return true; } catch (err) { /* a bad pattern matches nothing */ } continue; }
+    for (const frag of r.contains || []) {
+      const f = String(frag).toLowerCase().trim();
+      if (!f) continue;
+      const esc = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (r.wholeWord ? new RegExp(`(^|[^a-z0-9])${esc}($|[^a-z0-9])`, 'i').test(norm) : padded.includes(f)) return true;
+    }
+  }
+  return false;
+}
+function seriesSlot(e, s){ return (s.slots || []).find(x => (x.months || []).includes(e.month)) || null; }
+function seriesScheduleName(norm, s){
+  const sch = s.schedule;
+  if (!sch || !sch.pattern) return false;
+  try { if (!new RegExp(sch.pattern, 'i').test(norm || '')) return false; } catch (err) { return false; }
+  return !(sch.exclude || []).some(w => String(norm).includes(String(w).toLowerCase()));
+}
+// The name a running is paired on across seasons. A series show pairs on its slot, so
+// the spring Maricopa show matches itself whether it was called Home & Garden (to 2024)
+// or Home & Flower (2025 on), and January only ever pairs with January.
+function matchName(e){
+  for (const s of seriesList()) if (seriesMember(e, s)) { const sl = seriesSlot(e, s); return `series:${s.id}:${sl ? sl.id : 'other'}`; }
+  return e.eventNorm;
+}
+
+// Match one season's events against another's, by name (a series show by its slot,
+// see matchName).
 //
 // A name's entries within a season are grouped by month first, so two rows for
 // the same show in the same month count as one running.
@@ -2015,12 +2070,13 @@ function matchEventsByName(eventsA, eventsB){
   const groupByMonth = arr => {
     const out = {};
     for (const ev of arr){
-      const key = ev.eventNorm + '|' + ev.month;
+      const mn = matchName(ev);
+      const key = mn + '|' + ev.month;
       if (!out[key]) {
         out[key] = {
           key, events:[ev], total:ev.total, orders:ev.orders,
           eventDisplay:ev.eventDisplay, category:ev.category,
-          month:ev.month, eventNorm: ev.eventNorm
+          month:ev.month, eventNorm: ev.eventNorm, matchName: mn
         };
       } else {
         out[key].events.push(ev);
@@ -2032,7 +2088,7 @@ function matchEventsByName(eventsA, eventsB){
   };
   const byName = groups => {
     const out = {};
-    for (const g of groups) (out[g.eventNorm] = out[g.eventNorm] || []).push(g);
+    for (const g of groups) (out[g.matchName] = out[g.matchName] || []).push(g);
     return out;
   };
   const na = byName(groupByMonth(eventsA)), nb = byName(groupByMonth(eventsB));
@@ -2106,6 +2162,7 @@ function saveStorage(){
       kpiHiddenYears: [...STATE.kpiHiddenYears],
       schedule: STATE.schedule || null,
       territories: STATE.territories || null,
+      series: STATE.series || null,
       lastUpdated: new Date().toISOString()
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -2125,6 +2182,7 @@ function loadStorage(){
     STATE.kpiHiddenYears = new Set((obj.kpiHiddenYears || []).map(Number));
     STATE.schedule = obj.schedule || null;
     STATE.territories = Array.isArray(obj.territories) && obj.territories.length ? obj.territories : null;
+    STATE.series = Array.isArray(obj.series) && obj.series.length ? obj.series : null;
     rebuildDerived();
     return STATE.events.length > 0;
   } catch (e) {
@@ -2141,6 +2199,7 @@ function buildPayload(){
     kpiHiddenYears: [...STATE.kpiHiddenYears],
     schedule: STATE.schedule || null,
     territories: STATE.territories || null,
+    series: STATE.series || null,
     lastUpdated: new Date().toISOString()
   };
 }
@@ -2179,6 +2238,7 @@ async function loadPublishedData(hadLocal){
     STATE.kpiHiddenYears = new Set((obj.kpiHiddenYears || []).map(Number));
     STATE.schedule = obj.schedule || null;
     STATE.territories = Array.isArray(obj.territories) && obj.territories.length ? obj.territories : null;
+    STATE.series = Array.isArray(obj.series) && obj.series.length ? obj.series : null;
     rebuildDerived();
     updateNavChrome();
     setActivePage('overview');
@@ -4523,6 +4583,7 @@ function renderLayers(){
   renderMoneyMix(primary, bench, primEvs, benchEvs);
   renderConcentration(primary, scope);
   renderTerritories(primary, bench, primEvs, benchEvs);
+  renderSeries(primary, bench);
 }
 
 // ---- 1. Year-over-year bridge.
@@ -4817,6 +4878,236 @@ function renderTerritories(primary, bench, primEvs, benchEvs){
     html += `<p class="ly-note">Every event keeps its ranking and is counted in the season totals as usual; this panel is the same events read through the territory tag. Tags come from the campaign refresh's territory name rules and can be set or removed by hand in Data &amp; Settings → Find &amp; re-rank.${dnr.length ? ` ${dnr.length} tagged ${primary} event${dnr.length === 1 ? '' : 's'} with $0 and no orders (${dnr.slice(0, 3).map(e => escapeHtml(e.eventDisplay)).join(', ')}${dnr.length > 3 ? '…' : ''}) are left out as "did not run".` : ''}</p>`;
   }
   el.innerHTML = html;
+}
+
+// ---- 6. Series: the Maricopa County Home Shows, five a year. Every show is matched to the
+// same show in every other year by its slot (the part of the year it runs in), so January is
+// only ever compared with January, and the spring show (Home & Garden to 2024, Home & Flower
+// since) is one show rather than one lost and one new. Membership rules and slots come from
+// payload.series (the automation's config.json → series); shifts from the Show Shift Schedule,
+// every booth included; reps who wrote orders from roster.json.
+function fmtRangeUTC(a, b){
+  const d1 = new Date(a), d2 = new Date(b || a);
+  if (isNaN(d1.getTime())) return '';
+  const m1 = MONTH_NAMES[d1.getUTCMonth()];
+  if (isNaN(d2.getTime()) || d2 <= d1) return `${m1} ${d1.getUTCDate()}`;
+  const m2 = MONTH_NAMES[d2.getUTCMonth()];
+  return m1 === m2 ? `${m1} ${d1.getUTCDate()}–${d2.getUTCDate()}` : `${m1} ${d1.getUTCDate()}–${m2} ${d2.getUTCDate()}`;
+}
+function renderSeries(primary, bench){
+  const el = document.getElementById('seriesBody');
+  const titleEl = document.getElementById('seriesTitle');
+  // "Reps who wrote" needs roster.json: fetch it once, then redraw this panel.
+  if (!ROSTER_LOAD) loadRoster().then(() => renderSeries(STATE.primaryYear, benchYear()));
+  const list = seriesList();
+  const sum = (arr, f) => arr.reduce((a, x) => a + (f(x) || 0), 0);
+  const lastMonthOf = y => { const ms = activeMonthsForYear(STATE.byYear[y] || []); return ms.length ? ms[ms.length - 1] : -1; };
+  const seasonCpo = (y, upTo) => sum((STATE.byYear[y] || []).filter(e => upTo == null || e.month <= upTo), e => e.total);
+  const f2 = v => v.toFixed(2);
+  let html = '';
+  for (const s of list) {
+    if (list.length === 1) titleEl.innerHTML = `${escapeHtml(s.label)} <span class="ptit2-sub">— every show matched to the same show in other years by when it runs, not by its name</span>`;
+    else html += `<div class="ly-list-t" style="margin-top:22px;">${escapeHtml(s.label)}</div>`;
+    const all = STATE.events.filter(e => !didNotRun(e) && seriesMember(e, s));
+    if (!all.length) { html += `<p class="ly-empty">No ${escapeHtml(s.label)} in the data yet.</p>`; continue; }
+    const slots = (s.slots || []).slice();
+    const slotId = e => (seriesSlot(e, s) || {id: 'other'}).id;
+    if (all.some(e => slotId(e) === 'other')) slots.push({id: 'other', label: 'Other dates', show: 'outside the usual slots', months: []});
+    const nSlots = (s.slots || []).length;
+    const years = [...new Set(all.map(e => e.year))].sort((a, b) => a - b);
+
+    // One cell = one slot in one year (normally one show).
+    const cellOf = evs => {
+      if (!evs.length) return null;
+      const rs = ROSTER && ROSTER.events ? evs.map(e => ROSTER.events[e.eventRaw]) : [];
+      return {
+        evs, cpo: sum(evs, e => e.total), orders: sum(evs, e => e.orders),
+        booth: sum(evs, e => e.booth), sc: sum(evs, e => e.sc), fl: sum(evs, e => e.fl), other: sum(evs, e => e.other),
+        shifts: evs.every(e => typeof e.shifts === 'number' && e.shifts > 0) ? sum(evs, e => e.shifts) : null,
+        repSet: rs.length && rs.every(r => Array.isArray(r) && r.length) ? new Set(rs.flat().map(r => r.rep)) : null,
+        start: evs.map(e => e.startDate).sort()[0], end: evs.map(e => e.endDate || e.startDate).sort().slice(-1)[0],
+      };
+    };
+    const C = {};
+    for (const y of years) { C[y] = {}; for (const sl of slots) C[y][sl.id] = cellOf(all.filter(e => e.year === y && slotId(e) === sl.id)); }
+    const cell = (y, sid) => (C[y] ? C[y][sid] : null) || null;
+    // A slot is due in a year once that year's data reaches the slot's first month.
+    const due = (y, sl) => sl.id === 'other' || Math.min(...sl.months) <= lastMonthOf(y);
+    // Totals over a set of cells. Per-shift and per-rep figures use only the cells that have
+    // shifts / a roster, and say how many that is.
+    const tot = cells => {
+      cells = cells.filter(Boolean);
+      const withS = cells.filter(c => c.shifts), withR = cells.filter(c => c.repSet);
+      const reps = new Set(); for (const c of withR) for (const r of c.repSet) reps.add(r);
+      return { n: cells.length, cpo: sum(cells, c => c.cpo), orders: sum(cells, c => c.orders),
+        booth: sum(cells, c => c.booth), sc: sum(cells, c => c.sc), fl: sum(cells, c => c.fl), other: sum(cells, c => c.other),
+        shifts: sum(withS, c => c.shifts), sCpo: sum(withS, c => c.cpo), sOrd: sum(withS, c => c.orders), sN: withS.length,
+        reps: reps.size, rCpo: sum(withR, c => c.cpo), rN: withR.length };
+    };
+    const val = (t, k) => {
+      if (!t || !t.n) return null;
+      switch (k) {
+        case 'cpo': return t.cpo;
+        case 'orders': return t.orders;
+        case 'avg': return t.orders ? t.cpo / t.orders : null;
+        case 'shifts': return t.sN ? t.shifts : null;
+        case 'perShift': return t.shifts ? t.sCpo / t.shifts : null;
+        case 'ordPerShift': return t.shifts ? t.sOrd / t.shifts : null;
+        case 'reps': return t.rN ? t.reps : null;
+        case 'perRep': return t.reps ? t.rCpo / t.reps : null;
+      }
+      return null;
+    };
+    const one = c => (c ? tot([c]) : null);
+    // Shift and rep figures compare only the shows that have them in BOTH years, so a year
+    // with fewer schedule rows or rosters is not read as fewer shifts or fewer reps.
+    const needs = k => (k === 'shifts' || k === 'perShift' || k === 'ordPerShift') ? (c => !!c.shifts) : (k === 'reps' || k === 'perRep') ? (c => !!c.repSet) : null;
+    const pairTot = (slotList, ya, yb, k) => {
+      const n = needs(k);
+      const both = n ? slotList.filter(sl => { const a = cell(ya, sl.id), b = cell(yb, sl.id); return a && b && n(a) && n(b); }) : slotList;
+      return [tot(both.map(sl => cell(ya, sl.id))), tot(both.map(sl => cell(yb, sl.id))), both.length];
+    };
+    const pctCell = (v, vb) => (v != null && vb ? ` <span class="${deltaClass(v - vb)}">${deltaArrow(v - vb)} ${fmtPct((v - vb) / vb)}</span>` : '');
+    const P = primary, B = bench && C[bench] ? bench : null;
+    const lastP = lastMonthOf(P);
+    const sched = STATE.schedule && Number(STATE.schedule.year) === P ? (STATE.schedule.events || []) : [];
+    const bookedFor = sl => sl.id === 'other' ? null : sched.find(r => { const d = new Date(`${r.start}T00:00:00Z`); return !isNaN(d.getTime()) && d.getUTCFullYear() === P && sl.months.includes(d.getUTCMonth()) && seriesScheduleName(r.norm, s); }) || null;
+    const statusOf = (y, sl) => cell(y, sl.id) ? 'ran' : (due(y, sl) ? 'missed' : 'pending');
+    const bookedText = (y, sl) => { const b = y === P ? bookedFor(sl) : null; return b ? `booked ${fmtRangeUTC(b.start + 'T00:00:00Z', b.end + 'T00:00:00Z')}` : null; };
+    const waitText = (y, sl) => bookedText(y, sl) || 'not in yet';
+
+    if (!C[P]) {
+      html += `<p class="ly-head-line">No ${escapeHtml(s.label)} with sales in ${P} yet; the grid below has every season that has them.</p>`;
+    } else {
+      // --- headline + tiles: this season against the same shows in the benchmark season
+      const dueSlots = slots.filter(sl => due(P, sl) || cell(P, sl.id));
+      const pending = slots.filter(sl => statusOf(P, sl) === 'pending');
+      const tP = tot(dueSlots.map(sl => cell(P, sl.id)));
+      const tBs = B ? tot(dueSlots.map(sl => cell(B, sl.id))) : null;
+      const tBf = B ? tot(slots.map(sl => cell(B, sl.id))) : null;
+      const seasonP = seasonCpo(P), seasonBs = B ? seasonCpo(B, lastP < 11 ? lastP : null) : 0;
+      const shareP = seasonP ? tP.cpo / seasonP : null, shareB = B && seasonBs ? tBs.cpo / seasonBs : null;
+      let head = `${P}: <b>${tP.n}</b> of ${nSlots} shows in, <b>${fmt$(tP.cpo)}</b> CPO, ${fmtN(tP.orders)} orders — ${fmtPct0(shareP)} of the ${P} season${lastP < 11 ? ' so far' : ''}.`;
+      if (B) {
+        const d = tP.cpo - tBs.cpo;
+        head += ` The same ${dueSlots.length === 1 ? 'show' : `${dueSlots.length} shows`} in ${B} made <b>${fmt$(tBs.cpo)}</b>: <b class="${deltaClass(d)}">${fmtDelta$(d)}${tBs.cpo ? ` (${fmtPct(d / tBs.cpo)})` : ''}</b>.`;
+        if (pending.length) head += ` ${B}'s full year was ${fmt$(tBf.cpo)}; ${P} ${tP.cpo >= tBf.cpo ? `has already passed it by ${fmt$(tP.cpo - tBf.cpo)}` : `needs ${fmt$(tBf.cpo - tP.cpo)} more to match it`}, with ${pending.map(sl => `the ${sl.label} show${bookedText(P, sl) ? ` (${bookedText(P, sl)})` : ''}`).join(' and ')} still to come.`;
+      }
+      html += `<p class="ly-head-line">${head}</p>`;
+      const tile = (lbl, k, f) => {
+        const [a, b, n] = B && needs(k) ? pairTot(dueSlots, P, B, k) : [tP, tBs, tP.n];
+        const v = val(a, k), vb = b ? val(b, k) : null;
+        const cover = needs(k) && n < tP.n ? ` · over the ${n} of ${tP.n} shows with ${(k === 'reps' || k === 'perRep') ? 'a roster' : 'shift counts'}${B ? ' in both years' : ''}` : '';
+        return [lbl, v != null ? f(v) : '—', `${B ? `${B} same shows: ${vb != null ? f(vb) : '—'}${v != null && vb ? ` · ${deltaArrow(v - vb)} ${fmtPct((v - vb) / vb)}` : ''}` : ''}${cover}`];
+      };
+      html += `<div class="ly-kpis">` + [
+        tile('CPO', 'cpo', fmt$),
+        tile('Orders', 'orders', fmtN),
+        tile('Average order', 'avg', fmt$),
+        tile('CPO per shift', 'perShift', fmt$),
+        tile('Orders per shift', 'ordPerShift', f2),
+        ['Share of the season', fmtPct0(shareP), B ? `${B}${lastP < 11 ? ` through ${MONTH_NAMES[lastP]}` : ''}: ${fmtPct0(shareB)}` : ''],
+      ].map(([l, v, sb]) => `<div class="kpi-tile"><div class="kpi-lbl">${l}</div><div class="kpi-hero">${v}</div><div class="kpi-sub">${sb}</div></div>`).join('') + `</div>`;
+
+      // --- by show, this season against the benchmark: every number, two lines per cell
+      const MET = [['cpo', 'CPO', fmt$], ['orders', 'Orders', fmtN], ['avg', 'Avg order', fmt$], ['shifts', 'Shifts', fmtN], ['perShift', 'CPO / shift', fmt$], ['reps', 'Reps who wrote', fmtN], ['perRep', 'CPO / rep', fmt$]];
+      const pair = (tp, tb, k, f) => {
+        const v = val(tp, k), vb = val(tb, k);
+        const d = pctCell(v, vb).trim();
+        return `<td class="r"><span class="sr-v">${v != null ? f(v) : '<span class="dim">—</span>'}</span>${B ? `<span class="sr-sub">${B}: ${vb != null ? f(vb) : '—'}</span>${d ? `<span class="sr-sub">${d}</span>` : ''}` : ''}</td>`;
+      };
+      html += `<div class="ly-list-t">By show · ${P}${B ? ` against the same show in ${B}` : ''}</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Show</th>${MET.map(([, l]) => `<th class="r">${l}</th>`).join('')}</tr></thead><tbody>`;
+      for (const sl of slots) {
+        const cp = cell(P, sl.id), cb = B ? cell(B, sl.id) : null;
+        if (!cp && !cb) continue;
+        const names = [cp, cb].filter(Boolean).flatMap(c => c.evs.map(e => `${e.year}: ${e.eventDisplay}`)).join('\n');
+        const dates = [cp ? `${P}: ${fmtRangeUTC(cp.start, cp.end)}` : '', cb ? `${B}: ${fmtRangeUTC(cb.start, cb.end)}` : ''].filter(Boolean).join(' · ');
+        const first = `<td title="${escapeHtml(names)}"><span class="sr-show">${escapeHtml(sl.label)}</span> · ${escapeHtml(sl.show)}<span class="sr-sub">${dates}</span></td>`;
+        if (!cp) {
+          const st = statusOf(P, sl);
+          html += `<tr>${first}<td colspan="${MET.length}"><span class="sr-wait">${P}: ${st === 'pending' ? `${waitText(P, sl)} — the campaign refresh after it runs brings its numbers` : 'not worked'}.</span><span class="sr-sub">${B}: ${fmt$(cb.cpo)} · ${fmtN(cb.orders)} orders · ${fmt$(cb.orders ? cb.cpo / cb.orders : 0)} avg order${cb.shifts ? ` · ${cb.shifts} shifts · ${fmt$(cb.cpo / cb.shifts)} / shift` : ''}${cb.repSet ? ` · ${cb.repSet.size} reps wrote` : ''}</span></td></tr>`;
+          continue;
+        }
+        html += `<tr>${first}${MET.map(([k, , f]) => pair(one(cp), one(cb), k, f)).join('')}</tr>`;
+      }
+      html += `<tr class="total"><td class="cat">${pending.length ? `Same ${dueSlots.length} shows` : 'All shows'}</td>${MET.map(([k, , f]) => {
+        if (!B || !needs(k)) return pair(tP, tBs, k, f);
+        const [a, b, n] = pairTot(dueSlots, P, B, k);
+        return pair(a, b, k, f).replace(/<\/td>$/, n < dueSlots.length ? `<span class="sr-sub" title="only the ${n} show${n === 1 ? '' : 's'} with ${(k === 'reps' || k === 'perRep') ? 'a roster' : 'a shift count'} in both years">on ${n} show${n === 1 ? '' : 's'}</span></td>` : '</td>');
+      }).join('')}</tr>`;
+      if (B && pending.length) html += `<tr class="total"><td class="cat">${B} full year · ${tBf.n} shows</td>${MET.map(([k, , f]) => { const v = val(tBf, k); return `<td class="r"><span class="sr-v">${v != null ? f(v) : '—'}</span></td>`; }).join('')}</tr>`;
+      html += `</tbody></table></div>`;
+    }
+
+    // --- every year, show by show: one number at a time, each against the same show a year earlier
+    const GRID = [['cpo', 'CPO', fmt$], ['orders', 'Orders', fmtN], ['avg', 'Avg order', fmt$], ['perShift', 'CPO / shift', fmt$], ['ordPerShift', 'Orders / shift', f2], ['shifts', 'Shifts', fmtN], ['reps', 'Reps who wrote', fmtN], ['perRep', 'CPO / rep', fmt$]];
+    const mk = GRID.some(g => g[0] === STATE.srMetric) ? STATE.srMetric : 'cpo';
+    const mf = GRID.find(g => g[0] === mk)[2];
+    const colCls = y => (y === P ? 'sr-cur' : y === B ? 'sr-bench' : '');
+    html += `<div style="height:22px;"></div><div class="ly-list-t">Every year, show by show · each against the same show the year before</div>`;
+    html += `<div class="chip-row" id="srChips"><span class="chip-lbl">Show</span>${GRID.map(([k, l]) => `<button class="chip ${mk === k ? 'active' : ''}" data-m="${k}">${l}</button>`).join('')}</div><div style="height:10px;"></div>`;
+    html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Show</th>${years.map(y => `<th class="r ${colCls(y)}">${y}${y === P ? ' · season' : y === B ? ' · benchmark' : ''}</th>`).join('')}</tr></thead><tbody>`;
+    for (const sl of slots) {
+      if (!years.some(y => cell(y, sl.id)) && sl.id === 'other') continue;
+      html += `<tr><td><span class="sr-show">${escapeHtml(sl.label)}</span> · ${escapeHtml(sl.show)}</td>`;
+      for (const y of years) {
+        const c = cell(y, sl.id), pc = cell(y - 1, sl.id);
+        if (!c) {
+          const st = statusOf(y, sl);
+          html += `<td class="r ${colCls(y)}"><span class="sr-wait">${st === 'pending' ? waitText(y, sl) : 'not worked'}</span></td>`;
+          continue;
+        }
+        const v = val(one(c), mk), pv = pc ? val(one(pc), mk) : null;
+        html += `<td class="r ${colCls(y)}" title="${escapeHtml(c.evs.map(e => e.eventDisplay).join(' + '))}"><span class="sr-v">${v != null ? mf(v) : '<span class="dim">—</span>'}</span><span class="sr-sub">${fmtRangeUTC(c.start, c.end)}${pctCell(v, pv)}</span></td>`;
+      }
+      html += `</tr>`;
+    }
+    // year totals, each against the same shows the year before (so a season still running
+    // is not measured against a whole year)
+    html += `<tr class="total"><td class="cat">Year</td>`;
+    for (const y of years) {
+      const ds = slots.filter(sl => due(y, sl) || cell(y, sl.id));
+      const t = tot(ds.map(sl => cell(y, sl.id)));
+      const v = val(t, mk);
+      let pv = null, vNow = v;
+      if (C[y - 1]) {
+        const [a, b] = pairTot(ds, y, y - 1, mk);
+        vNow = val(a, mk); pv = val(b, mk);
+      }
+      const cov = (mk === 'perShift' || mk === 'ordPerShift' || mk === 'shifts') && t.sN < t.n ? ` · ${t.sN} of ${t.n} counted` : (mk === 'reps' || mk === 'perRep') && t.rN < t.n ? ` · ${t.rN} of ${t.n} with a roster` : '';
+      const left = slots.filter(sl => sl.id !== 'other' && statusOf(y, sl) === 'pending').length;
+      html += `<td class="r ${colCls(y)}"><span class="sr-v">${v != null ? mf(v) : '—'}</span><span class="sr-sub">${t.n} show${t.n === 1 ? '' : 's'}${left ? ` · ${left} to come` : ''}${cov}${pctCell(vNow, pv)}</span></td>`;
+    }
+    html += `</tr><tr class="total"><td class="cat">Share of the season</td>`;
+    for (const y of years) {
+      const t = tot(slots.map(sl => cell(y, sl.id))), sc = seasonCpo(y);
+      html += `<td class="r ${colCls(y)}"><span class="sr-v">${sc ? fmtPct0(t.cpo / sc) : '—'}</span><span class="sr-sub">of ${fmt$(sc)}${lastMonthOf(y) < 11 ? ' so far' : ''}</span></td>`;
+    }
+    html += `</tr></tbody></table></div>`;
+
+    // --- where the money came from, this season, show by show
+    if (C[P]) {
+      const parts = [['booth', 'At the booth', 'var(--ember)'], ['sc', 'Service call', 'var(--info)'], ['fl', 'Free look', 'var(--pos-bar)'], ['other', 'Other', 'var(--faded)']];
+      const tail = t => (t && t.cpo ? (t.sc + t.fl + t.other) / t.cpo : null);
+      const bar = t => `<div class="mix">${parts.map(([p, l, c]) => { const w = t.cpo ? t[p] / t.cpo * 100 : 0; return w > 0 ? `<span class="mix-seg" style="width:${w.toFixed(2)}%;background:${c}" title="${l} ${fmt$(t[p])} (${w.toFixed(0)}%)"></span>` : ''; }).join('')}</div>`;
+      const mixRow = (lbl, t, tb, cls) => `<tr${cls ? ` class="${cls}"` : ''}><td class="cat">${lbl}</td><td>${bar(t)}</td><td class="r">${fmt$(t.cpo)}</td>${parts.map(([p]) => `<td class="r">${fmtPct0(t.cpo ? t[p] / t.cpo : NaN)}</td>`).join('')}<td class="r">${fmtPct0(tail(t))}</td>${B ? (tail(tb) != null ? `<td class="r ${deltaClass(tail(t) - tail(tb))}">${deltaArrow(tail(t) - tail(tb))} ${((tail(t) - tail(tb)) * 100).toFixed(1)} pts</td>` : '<td class="r"><span class="dim">—</span></td>') : ''}</tr>`;
+      html += `<div style="height:22px;"></div><div class="ly-list-t">At the booth vs after the booth · ${P}, show by show</div>`;
+      html += `<div class="mix-legend">${parts.map(([, l, c]) => `<span><i style="background:${c}"></i>${l}</span>`).join('')}</div>`;
+      html += `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Show</th><th>Mix</th><th class="r">CPO</th><th class="r">Booth</th><th class="r">Service call</th><th class="r">Free look</th><th class="r">Other</th><th class="r">After the booth</th>${B ? `<th class="r">vs same show ${B}</th>` : ''}</tr></thead><tbody>`;
+      const ran = slots.filter(sl => cell(P, sl.id));
+      for (const sl of ran) html += mixRow(`${escapeHtml(sl.label)} · ${escapeHtml(sl.show)}`, one(cell(P, sl.id)), B ? one(cell(B, sl.id)) : null);
+      html += mixRow('All', tot(ran.map(sl => cell(P, sl.id))), B ? tot(ran.map(sl => cell(B, sl.id))) : null, 'total');
+      html += `</tbody></table></div>`;
+    }
+
+    // --- how it is matched and counted
+    const noShift = years.flatMap(y => slots.map(sl => cell(y, sl.id)).filter(c => c && !c.shifts).map(c => `${MONTH_NAMES[new Date(c.start).getUTCMonth()]} ${new Date(c.start).getUTCFullYear()}`));
+    const slotList = (s.slots || []).map(sl => `${sl.label} (${sl.show})`).join(', ');
+    html += `<p class="ly-note">Each show is matched to the same show in other years by when it runs: ${escapeHtml(slotList)}. By Event and the bridge pair them the same way. ${escapeHtml(s.note ? s.note[0].toUpperCase() + s.note.slice(1) : '')} Every show still counts as its ranking (Elite) in every other total on this site.</p>`;
+    html += `<p class="ly-note">Shifts are one rep on one selling day from the Show Shift Schedule, every booth included (booths #2 and #3 are their own rows on the schedule). ${noShift.length ? `${noShift.length} show${noShift.length === 1 ? ' has' : 's have'} no shift rows on the schedule (${escapeHtml(noShift.join(', '))}) and ${noShift.length === 1 ? 'is' : 'are'} left out of the per-shift figures.` : 'Every show has a shift count.'} Reps who wrote orders come from the rep roster${ROSTER ? '' : ' (not loaded)'}, which covers 2025 on; a show whose rep lines do not tie out to VectorConnect yet shows —. A year's reps are counted once however many shows they wrote at. Changes against another year always compare the same shows: while a season is still running, the other year counts only the shows this season has reached, and shift and rep figures count only the shows that have them in both years.</p>`;
+  }
+  el.innerHTML = html;
+  el.querySelectorAll('#srChips .chip').forEach(c => c.addEventListener('click', () => { STATE.srMetric = c.dataset.m; renderSeries(STATE.primaryYear, benchYear()); }));
 }
 
 // ---- 4. Concentration: how much of the season rides on the biggest events
