@@ -4884,8 +4884,9 @@ function renderTerritories(primary, bench, primEvs, benchEvs){
 // same show in every other year by its slot (the part of the year it runs in), so January is
 // only ever compared with January, and the spring show (Home & Garden to 2024, Home & Flower
 // since) is one show rather than one lost and one new. Membership rules and slots come from
-// payload.series (the automation's config.json → series); shifts from the Show Shift Schedule,
-// every booth included; reps who wrote orders from roster.json.
+// payload.series (the automation's config.json → series). Shifts and reps who worked come from
+// the Show Shift Board (2026 on) or the Show Shift Schedule Sheets, every booth included, written
+// onto each event by the automation (shifts, reps, shiftSource); VectorConnect gives the CPO.
 function fmtRangeUTC(a, b){
   const d1 = new Date(a), d2 = new Date(b || a);
   if (isNaN(d1.getTime())) return '';
@@ -4897,13 +4898,12 @@ function fmtRangeUTC(a, b){
 function renderSeries(primary, bench){
   const el = document.getElementById('seriesBody');
   const titleEl = document.getElementById('seriesTitle');
-  // "Reps who wrote" needs roster.json: fetch it once, then redraw this panel.
-  if (!ROSTER_LOAD) loadRoster().then(() => renderSeries(STATE.primaryYear, benchYear()));
   const list = seriesList();
   const sum = (arr, f) => arr.reduce((a, x) => a + (f(x) || 0), 0);
   const lastMonthOf = y => { const ms = activeMonthsForYear(STATE.byYear[y] || []); return ms.length ? ms[ms.length - 1] : -1; };
   const seasonCpo = (y, upTo) => sum((STATE.byYear[y] || []).filter(e => upTo == null || e.month <= upTo), e => e.total);
   const f2 = v => v.toFixed(2);
+  const f1 = v => (Number.isInteger(v) ? fmtN(v) : v.toFixed(1));
   let html = '';
   for (const s of list) {
     if (list.length === 1) titleEl.innerHTML = `${escapeHtml(s.label)} <span class="ptit2-sub">— every show matched to the same show in other years by when it runs, not by its name</span>`;
@@ -4919,12 +4919,12 @@ function renderSeries(primary, bench){
     // One cell = one slot in one year (normally one show).
     const cellOf = evs => {
       if (!evs.length) return null;
-      const rs = ROSTER && ROSTER.events ? evs.map(e => ROSTER.events[e.eventRaw]) : [];
       return {
         evs, cpo: sum(evs, e => e.total), orders: sum(evs, e => e.orders),
         booth: sum(evs, e => e.booth), sc: sum(evs, e => e.sc), fl: sum(evs, e => e.fl), other: sum(evs, e => e.other),
         shifts: evs.every(e => typeof e.shifts === 'number' && e.shifts > 0) ? sum(evs, e => e.shifts) : null,
-        repSet: rs.length && rs.every(r => Array.isArray(r) && r.length) ? new Set(rs.flat().map(r => r.rep)) : null,
+        reps: evs.every(e => typeof e.reps === 'number' && e.reps > 0) ? sum(evs, e => e.reps) : null,
+        fromBoard: evs.some(e => e.shiftSource === 'board'),
         start: evs.map(e => e.startDate).sort()[0], end: evs.map(e => e.endDate || e.startDate).sort().slice(-1)[0],
       };
     };
@@ -4934,15 +4934,14 @@ function renderSeries(primary, bench){
     // A slot is due in a year once that year's data reaches the slot's first month.
     const due = (y, sl) => sl.id === 'other' || Math.min(...sl.months) <= lastMonthOf(y);
     // Totals over a set of cells. Per-shift and per-rep figures use only the cells that have
-    // shifts / a roster, and say how many that is.
+    // shifts / reps, and say how many that is. Reps over several shows read as the average per show.
     const tot = cells => {
       cells = cells.filter(Boolean);
-      const withS = cells.filter(c => c.shifts), withR = cells.filter(c => c.repSet);
-      const reps = new Set(); for (const c of withR) for (const r of c.repSet) reps.add(r);
+      const withS = cells.filter(c => c.shifts), withR = cells.filter(c => c.reps);
       return { n: cells.length, cpo: sum(cells, c => c.cpo), orders: sum(cells, c => c.orders),
         booth: sum(cells, c => c.booth), sc: sum(cells, c => c.sc), fl: sum(cells, c => c.fl), other: sum(cells, c => c.other),
         shifts: sum(withS, c => c.shifts), sCpo: sum(withS, c => c.cpo), sOrd: sum(withS, c => c.orders), sN: withS.length,
-        reps: reps.size, rCpo: sum(withR, c => c.cpo), rN: withR.length };
+        reps: sum(withR, c => c.reps), rCpo: sum(withR, c => c.cpo), rN: withR.length };
     };
     const val = (t, k) => {
       if (!t || !t.n) return null;
@@ -4953,7 +4952,7 @@ function renderSeries(primary, bench){
         case 'shifts': return t.sN ? t.shifts : null;
         case 'perShift': return t.shifts ? t.sCpo / t.shifts : null;
         case 'ordPerShift': return t.shifts ? t.sOrd / t.shifts : null;
-        case 'reps': return t.rN ? t.reps : null;
+        case 'reps': return t.rN ? t.reps / t.rN : null;
         case 'perRep': return t.reps ? t.rCpo / t.reps : null;
       }
       return null;
@@ -4961,7 +4960,7 @@ function renderSeries(primary, bench){
     const one = c => (c ? tot([c]) : null);
     // Shift and rep figures compare only the shows that have them in BOTH years, so a year
     // with fewer schedule rows or rosters is not read as fewer shifts or fewer reps.
-    const needs = k => (k === 'shifts' || k === 'perShift' || k === 'ordPerShift') ? (c => !!c.shifts) : (k === 'reps' || k === 'perRep') ? (c => !!c.repSet) : null;
+    const needs = k => (k === 'shifts' || k === 'perShift' || k === 'ordPerShift') ? (c => !!c.shifts) : (k === 'reps' || k === 'perRep') ? (c => !!c.reps) : null;
     const pairTot = (slotList, ya, yb, k) => {
       const n = needs(k);
       const both = n ? slotList.filter(sl => { const a = cell(ya, sl.id), b = cell(yb, sl.id); return a && b && n(a) && n(b); }) : slotList;
@@ -4997,7 +4996,7 @@ function renderSeries(primary, bench){
       const tile = (lbl, k, f) => {
         const [a, b, n] = B && needs(k) ? pairTot(dueSlots, P, B, k) : [tP, tBs, tP.n];
         const v = val(a, k), vb = b ? val(b, k) : null;
-        const cover = needs(k) && n < tP.n ? ` · over the ${n} of ${tP.n} shows with ${(k === 'reps' || k === 'perRep') ? 'a roster' : 'shift counts'}${B ? ' in both years' : ''}` : '';
+        const cover = needs(k) && n < tP.n ? ` · over the ${n} of ${tP.n} shows with ${(k === 'reps' || k === 'perRep') ? 'rep counts' : 'shift counts'}${B ? ' in both years' : ''}` : '';
         return [lbl, v != null ? f(v) : '—', `${B ? `${B} same shows: ${vb != null ? f(vb) : '—'}${v != null && vb ? ` · ${deltaArrow(v - vb)} ${fmtPct((v - vb) / vb)}` : ''}` : ''}${cover}`];
       };
       html += `<div class="ly-kpis">` + [
@@ -5010,7 +5009,7 @@ function renderSeries(primary, bench){
       ].map(([l, v, sb]) => `<div class="kpi-tile"><div class="kpi-lbl">${l}</div><div class="kpi-hero">${v}</div><div class="kpi-sub">${sb}</div></div>`).join('') + `</div>`;
 
       // --- by show, this season against the benchmark: every number, two lines per cell
-      const MET = [['cpo', 'CPO', fmt$], ['orders', 'Orders', fmtN], ['avg', 'Avg order', fmt$], ['shifts', 'Shifts', fmtN], ['perShift', 'CPO / shift', fmt$], ['reps', 'Reps who wrote', fmtN], ['perRep', 'CPO / rep', fmt$]];
+      const MET = [['cpo', 'CPO', fmt$], ['orders', 'Orders', fmtN], ['avg', 'Avg order', fmt$], ['shifts', 'Shifts', fmtN], ['perShift', 'CPO / shift', fmt$], ['reps', 'Reps who worked', f1], ['perRep', 'CPO / rep', fmt$]];
       const pair = (tp, tb, k, f) => {
         const v = val(tp, k), vb = val(tb, k);
         const d = pctCell(v, vb).trim();
@@ -5025,7 +5024,7 @@ function renderSeries(primary, bench){
         const first = `<td title="${escapeHtml(names)}"><span class="sr-show">${escapeHtml(sl.label)}</span> · ${escapeHtml(sl.show)}<span class="sr-sub">${dates}</span></td>`;
         if (!cp) {
           const st = statusOf(P, sl);
-          html += `<tr>${first}<td colspan="${MET.length}"><span class="sr-wait">${P}: ${st === 'pending' ? `${waitText(P, sl)} — the campaign refresh after it runs brings its numbers` : 'not worked'}.</span><span class="sr-sub">${B}: ${fmt$(cb.cpo)} · ${fmtN(cb.orders)} orders · ${fmt$(cb.orders ? cb.cpo / cb.orders : 0)} avg order${cb.shifts ? ` · ${cb.shifts} shifts · ${fmt$(cb.cpo / cb.shifts)} / shift` : ''}${cb.repSet ? ` · ${cb.repSet.size} reps wrote` : ''}</span></td></tr>`;
+          html += `<tr>${first}<td colspan="${MET.length}"><span class="sr-wait">${P}: ${st === 'pending' ? `${waitText(P, sl)} — the campaign refresh after it runs brings its numbers` : 'not worked'}.</span><span class="sr-sub">${B}: ${fmt$(cb.cpo)} · ${fmtN(cb.orders)} orders · ${fmt$(cb.orders ? cb.cpo / cb.orders : 0)} avg order${cb.shifts ? ` · ${cb.shifts} shifts · ${fmt$(cb.cpo / cb.shifts)} / shift` : ''}${cb.reps ? ` · ${cb.reps} reps worked` : ''}</span></td></tr>`;
           continue;
         }
         html += `<tr>${first}${MET.map(([k, , f]) => pair(one(cp), one(cb), k, f)).join('')}</tr>`;
@@ -5033,14 +5032,14 @@ function renderSeries(primary, bench){
       html += `<tr class="total"><td class="cat">${pending.length ? `Same ${dueSlots.length} shows` : 'All shows'}</td>${MET.map(([k, , f]) => {
         if (!B || !needs(k)) return pair(tP, tBs, k, f);
         const [a, b, n] = pairTot(dueSlots, P, B, k);
-        return pair(a, b, k, f).replace(/<\/td>$/, n < dueSlots.length ? `<span class="sr-sub" title="only the ${n} show${n === 1 ? '' : 's'} with ${(k === 'reps' || k === 'perRep') ? 'a roster' : 'a shift count'} in both years">on ${n} show${n === 1 ? '' : 's'}</span></td>` : '</td>');
+        return pair(a, b, k, f).replace(/<\/td>$/, n < dueSlots.length ? `<span class="sr-sub" title="only the ${n} show${n === 1 ? '' : 's'} with ${(k === 'reps' || k === 'perRep') ? 'a rep count' : 'a shift count'} in both years">on ${n} show${n === 1 ? '' : 's'}</span></td>` : '</td>');
       }).join('')}</tr>`;
       if (B && pending.length) html += `<tr class="total"><td class="cat">${B} full year · ${tBf.n} shows</td>${MET.map(([k, , f]) => { const v = val(tBf, k); return `<td class="r"><span class="sr-v">${v != null ? f(v) : '—'}</span></td>`; }).join('')}</tr>`;
       html += `</tbody></table></div>`;
     }
 
     // --- every year, show by show: one number at a time, each against the same show a year earlier
-    const GRID = [['cpo', 'CPO', fmt$], ['orders', 'Orders', fmtN], ['avg', 'Avg order', fmt$], ['perShift', 'CPO / shift', fmt$], ['ordPerShift', 'Orders / shift', f2], ['shifts', 'Shifts', fmtN], ['reps', 'Reps who wrote', fmtN], ['perRep', 'CPO / rep', fmt$]];
+    const GRID = [['cpo', 'CPO', fmt$], ['orders', 'Orders', fmtN], ['avg', 'Avg order', fmt$], ['perShift', 'CPO / shift', fmt$], ['ordPerShift', 'Orders / shift', f2], ['shifts', 'Shifts', fmtN], ['reps', 'Reps who worked', f1], ['perRep', 'CPO / rep', fmt$]];
     const mk = GRID.some(g => g[0] === STATE.srMetric) ? STATE.srMetric : 'cpo';
     const mf = GRID.find(g => g[0] === mk)[2];
     const colCls = y => (y === P ? 'sr-cur' : y === B ? 'sr-bench' : '');
@@ -5074,9 +5073,10 @@ function renderSeries(primary, bench){
         const [a, b] = pairTot(ds, y, y - 1, mk);
         vNow = val(a, mk); pv = val(b, mk);
       }
-      const cov = (mk === 'perShift' || mk === 'ordPerShift' || mk === 'shifts') && t.sN < t.n ? ` · ${t.sN} of ${t.n} counted` : (mk === 'reps' || mk === 'perRep') && t.rN < t.n ? ` · ${t.rN} of ${t.n} with a roster` : '';
+      const avgNote = (mk === 'reps' || mk === 'perRep') ? ' · per show' : '';
+      const cov = (mk === 'perShift' || mk === 'ordPerShift' || mk === 'shifts') && t.sN < t.n ? ` · ${t.sN} of ${t.n} counted` : (mk === 'reps' || mk === 'perRep') && t.rN < t.n ? ` · ${t.rN} of ${t.n} counted` : '';
       const left = slots.filter(sl => sl.id !== 'other' && statusOf(y, sl) === 'pending').length;
-      html += `<td class="r ${colCls(y)}"><span class="sr-v">${v != null ? mf(v) : '—'}</span><span class="sr-sub">${t.n} show${t.n === 1 ? '' : 's'}${left ? ` · ${left} to come` : ''}${cov}${pctCell(vNow, pv)}</span></td>`;
+      html += `<td class="r ${colCls(y)}"><span class="sr-v">${v != null ? mf(v) : '—'}</span><span class="sr-sub">${t.n} show${t.n === 1 ? '' : 's'}${left ? ` · ${left} to come` : ''}${avgNote}${cov}${pctCell(vNow, pv)}</span></td>`;
     }
     html += `</tr><tr class="total"><td class="cat">Share of the season</td>`;
     for (const y of years) {
@@ -5104,7 +5104,8 @@ function renderSeries(primary, bench){
     const noShift = years.flatMap(y => slots.map(sl => cell(y, sl.id)).filter(c => c && !c.shifts).map(c => `${MONTH_NAMES[new Date(c.start).getUTCMonth()]} ${new Date(c.start).getUTCFullYear()}`));
     const slotList = (s.slots || []).map(sl => `${sl.label} (${sl.show})`).join(', ');
     html += `<p class="ly-note">Each show is matched to the same show in other years by when it runs: ${escapeHtml(slotList)}. By Event and the bridge pair them the same way. ${escapeHtml(s.note ? s.note[0].toUpperCase() + s.note.slice(1) : '')} Every show still counts as its ranking (Elite) in every other total on this site.</p>`;
-    html += `<p class="ly-note">Shifts are one rep on one selling day from the Show Shift Schedule, every booth included (booths #2 and #3 are their own rows on the schedule). ${noShift.length ? `${noShift.length} show${noShift.length === 1 ? ' has' : 's have'} no shift rows on the schedule (${escapeHtml(noShift.join(', '))}) and ${noShift.length === 1 ? 'is' : 'are'} left out of the per-shift figures.` : 'Every show has a shift count.'} Reps who wrote orders come from the rep roster${ROSTER ? '' : ' (not loaded)'}, which covers 2025 on; a show whose rep lines do not tie out to VectorConnect yet shows —. A year's reps are counted once however many shows they wrote at. Changes against another year always compare the same shows: while a season is still running, the other year counts only the shows this season has reached, and shift and rep figures count only the shows that have them in both years.</p>`;
+    const boardShows = years.flatMap(y => slots.map(sl => cell(y, sl.id)).filter(c => c && c.fromBoard)).length;
+    html += `<p class="ly-note">Shifts (one rep on one selling day) and reps who worked come from the Show Shift Board for 2026 on, when anyone is staffed there${boardShows ? ` (${boardShows} show${boardShows === 1 ? '' : 's'} here)` : ''}, and from the Show Shift Schedule Sheets otherwise, every booth included; VectorConnect supplies each show and its CPO. CPO per rep is the show's CPO divided by the reps who worked it; across several shows both read per show. ${noShift.length ? `${noShift.length} show${noShift.length === 1 ? ' has' : 's have'} no shift rows on the schedule (${escapeHtml(noShift.join(', '))}) and ${noShift.length === 1 ? 'is' : 'are'} left out of the per-shift and per-rep figures.` : 'Every show has a shift count.'} A row whose status on the Sheet is prospective or red is not counted as worked. Changes against another year always compare the same shows: while a season is still running, the other year counts only the shows this season has reached, and shift and rep figures count only the shows that have them in both years.</p>`;
   }
   el.innerHTML = html;
   el.querySelectorAll('#srChips .chip').forEach(c => c.addEventListener('click', () => { STATE.srMetric = c.dataset.m; renderSeries(STATE.primaryYear, benchYear()); }));
