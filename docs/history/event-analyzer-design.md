@@ -17,3 +17,10 @@ The Event Analyzer dashboard uses an intentional editorial/SaaS design system â€
 - **Auto Insights:** cards have a left severity border + a tinted monochrome SVG icon badge (trend up/down, alert, info) â€” no emoji.
 
 Insights intentionally exclude Industry, Realtor (RLT), and team-meeting events (see `isExcludedFromInsights`). See [[event-analyzer-deploy]] for hosting + how to ship changes.
+
+**Layers page (rebuilt 2026-10):** one section on screen at a time, chosen from a `.seg` tab row: Summary, What changed, Sales per shift, Booth vs follow-up, Top events, then one tab per territory and per show series (a picker inside the tab once there is more than one). It was a single 8-screen scroll with about 536 numbers showing; do not go back to stacking panels.
+- **Summary** has one card per section (`renderLySummary`); each `render*` function returns its own card, so a new section brings its card with it.
+- **Inside a section** only the headline, the tiles and the main chart or table stay open. Everything else goes through `lyFold(key, title, body, hint)`, closed by default, with a short hint beside the title so the answer shows before it is opened. Method notes always go in a last fold titled "How this is counted". Open folds are remembered in `STATE.lyOpen`, so re-renders keep them open.
+- **Names are plain words.** Tab, panel heading and Summary card use the same name; no analyst terms (bridge, concentration, productivity).
+- **Links:** `#layers/<section>` opens a section directly (`what-changed`, `sales-per-shift`, `booth-vs-follow-up`, `top-events`, a territory id such as `el-paso`, a series id such as `maricopa`). The hash is only present while Layers is on screen.
+- **Printing** prints the section on screen with every fold open.
